@@ -1,8 +1,9 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import pytorch_lightning as pl
+import pytorch_lightning as pl  # type: ignore
 import os
+import time
 
 from src.data import utils
 from src.frameworks.noise_schedule import InterpolationTransition, PredefinedNoiseScheduleDiscrete
@@ -147,6 +148,10 @@ class MarkovBridge(pl.LightningModule):
         product, p_node_mask = utils.to_dense(data.p_x, data.p_edge_index, data.p_edge_attr, data.batch)
         product = product.mask(p_node_mask)
 
+        context, c_node_mask = utils.to_dense(data.context_x, data.context_edge_index, data.context_edge_attr,
+                                              data.batch)
+        context = context.mask(c_node_mask)
+
         assert torch.allclose(r_node_mask, p_node_mask)
         node_mask = r_node_mask
 
@@ -159,7 +164,7 @@ class MarkovBridge(pl.LightningModule):
         )
 
         # Computing extra features + context and making predictions
-        context = product.clone() if self.use_context else None
+        # context = product.clone() if self.use_context else None
         extra_data = self.compute_extra_data(noisy_data, context=context)
         pred = self.forward(noisy_data, extra_data, node_mask)
 
@@ -299,7 +304,7 @@ class MarkovBridge(pl.LightningModule):
         else:
             return self.compute_validation_CE_loss(reactants=reactants, pred=pred, i=i)
 
-    def on_validation_epoch_end(self, outs):
+    def on_validation_epoch_end(self):
         self.val_counter += 1
         if self.val_counter % self.sample_every_val == 0:
             self.sample()
@@ -491,7 +496,10 @@ class MarkovBridge(pl.LightningModule):
         product = product.mask(node_mask)
 
         # Creating context
-        context = product.clone() if self.use_context else None
+        context, c_node_mask = utils.to_dense(data.context_x, data.context_edge_index, data.context_edge_attr,
+                                              data.batch)
+        context = context.mask(c_node_mask)
+        # context = product.clone() if self.use_context else None
 
         # Masks for fixed and modifiable nodes
         fixed_nodes = (product.X[..., -1] == 0).unsqueeze(-1)
@@ -550,7 +558,10 @@ class MarkovBridge(pl.LightningModule):
         product_discrete = product_discrete.mask(node_mask, collapse=True)
 
         # Creating context
-        context = product.clone() if self.use_context else None
+        context, c_node_mask = utils.to_dense(data.context_x, data.context_edge_index, data.context_edge_attr,
+                                              data.batch)
+        context = context.mask(c_node_mask)
+        # context = product.clone() if self.use_context else None
 
         # Masks for fixed and modifiable nodes
         fixed_nodes = (product.X[..., -1] == 0).unsqueeze(-1)
@@ -613,10 +624,10 @@ class MarkovBridge(pl.LightningModule):
             ell += edge_log_likelihood
 
         # Save raw predictions for further scoring
-        pred = sampled_s.clone()
+        pred = sampled_s.clone()  # type: ignore
 
         # Sample
-        sampled_s = sampled_s.mask(node_mask, collapse=True)
+        sampled_s = sampled_s.mask(node_mask, collapse=True)  # type: ignore
         X, E, y = sampled_s.X, sampled_s.E, sampled_s.y
 
         # Prepare the chain for saving
