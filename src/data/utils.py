@@ -102,6 +102,17 @@ def encode_no_edge(E):
     return E
 
 
+def decode_no_edge(E):
+    assert len(E.shape) == 4
+    if E.shape[-1] == 0:
+        return E
+
+    no_edge = E[:, :, :, 0] == 1  # 找到edge feature中第一个值为1的位置，这些位置原本是没有边
+    E[no_edge] = 0  # 将这些位置的所有特征值设置为0
+    diag = torch.eye(E.shape[1], dtype=torch.bool).unsqueeze(0).expand(E.shape[0], -1, -1)  # 创建一个对角线为1的矩阵，并扩展到与E相同的形状
+    E[diag] = 0
+    return E
+
 def create_true_reactant_molecules(data, batch_size):
     reactants, r_node_mask = to_dense(data.x, data.edge_index, data.edge_attr, data.batch)
     reactants = reactants.mask(r_node_mask, collapse=True)
