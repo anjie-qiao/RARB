@@ -1,27 +1,34 @@
 import argparse
 import os
+from time import time
 import pandas as pd
+import torch
 
 from src.utils import disable_rdkit_logging, parse_yaml_config, set_deterministic
+
+from src.data import utils
 from src.analysis.rdkit_functions import build_molecule
 from src.frameworks.discrete_diffusion import DiscreteDiffusion
-from src.frameworks.markov_bridge import MarkovBridge
+from src.frameworks.markov_bridge import MarkovBridge  
 from src.frameworks.one_shot_model import OneShotModel
 from src.data.retrobridge_dataset import RetroBridgeDataModule, RetroBridgeDatasetInfos
 
+from src.frameworks.rerto_classifier import RertoClassifier
+
 from rdkit import Chem
 from tqdm import tqdm
+import time
 
 from pdb import set_trace
-
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
 def main(args):
-    torch_device = 'cuda:0' if args.device == 'gpu' else 'cpu'
+    torch_device = 'cuda' if args.device == 'gpu' else 'cpu'
     data_root = os.path.join(args.data, args.dataset)
-    checkpoint_name = args.checkpoint.split('/')[-1].replace('.ckpt', '')
+    checkpoint_name = args.checkpoint_decoder.split('/')[-1].replace('.ckpt', '')
 
     output_dir = os.path.join(args.samples, f'{args.dataset}_{args.mode}')
-    table_name = f'{checkpoint_name}_T={args.n_steps}_n={args.n_samples}_seed={args.sampling_seed}.csv'
+    table_name = f'{checkpoint_name}_T={args.n_steps}_n={args.n_samples}_seednew={args.sampling_seed}.csv'
     table_path = os.path.join(output_dir, table_name)
 
     skip_first_n = 0
@@ -37,18 +44,16 @@ def main(args):
     print(f'Samples will be saved to {table_path}')
 
     # Loading model form checkpoint (all hparams will be automatically set)
-    if args.model == 'DiGress':
-        model_class = DiscreteDiffusion
-    elif args.model == 'OneShot':
-        model_class = OneShotModel
-    elif args.model == 'RetroBridge':
-        model_class = MarkovBridge
-    else:
-        raise NotImplementedError(args.model)
+    decoder_model = MarkovBridge
+    classifier_model = RertoClassifier
+    
+    print('Model class:', decoder_model)
 
-    print('Model class:', model_class)
-
-    model = model_class.load_from_checkpoint(args.checkpoint, map_location=torch_device)
+    classifier_model = classifier_model.load_from_checkpoint(args.checkpoint_classifier, map_location=torch_device)
+    classifier_model.eval().to(torch_device)
+    classifier_model.visualization_tools = None
+    decoder_model = decoder_model.load_from_checkpoint(args.checkpoint_decoder, map_location=torch_device)
+    
     datamodule = RetroBridgeDataModule(
         data_root=data_root,
         batch_size=args.batch_size,
@@ -61,10 +66,12 @@ def main(args):
     dataset_infos = RetroBridgeDatasetInfos(datamodule)
 
     set_deterministic(args.sampling_seed)
-    model.eval().to(torch_device)
+    decoder_model.eval().to(torch_device)
+    decoder_model.visualization_tools = None
+    decoder_model.T = args.n_steps
 
-    model.visualization_tools = None
-    model.T = args.n_steps
+    
+  
     group_size = args.n_samples
 
     ident = 0
@@ -93,36 +100,23 @@ def main(args):
         input_products = []
         for sample_idx in range(group_size):
             data = data.to(torch_device)
-            if args.model == 'OneShot':
-                pred_molecule_list, true_molecule_list, products_list, scores, nlls, ells = model.sample_batch(
-                    data=data,
-                    batch_id=ident,
-                    batch_size=bs,
-                    save_final=0,
-                    sample_idx=sample_idx,
-                )
-            elif args.model == 'DiGress':
-                pred_molecule_list, true_molecule_list, products_list, scores, nlls, ells = model.sample_batch(
-                    data=data,
-                    batch_id=ident,
-                    batch_size=bs,
-                    save_final=0,
-                    keep_chain=0,
-                    number_chain_steps_to_save=1,
-                    sample_idx=sample_idx,
-                )
-            else:
-                pred_molecule_list, true_molecule_list, products_list, scores, nlls, ells = model.sample_batch(
-                    data=data,
-                    batch_id=ident,
-                    batch_size=bs,
-                    save_final=0,
-                    keep_chain=0,
-                    number_chain_steps_to_save=1,
-                    sample_idx=sample_idx,
-                    save_true_reactants=True,
-                    use_one_hot=args.use_one_hot,
-                )
+            
+
+            pred_molecule_list, true_molecule_list, products_list, scores, nlls, ells = decoder_model.sample_batch(
+                data=data,
+                batch_id=ident,
+                batch_size=bs,
+                save_final=0,
+                keep_chain=0,
+                number_chain_steps_to_save=1,
+                sample_idx=sample_idx,
+                save_true_reactants=True,
+                use_one_hot=args.use_one_hot,
+
+                torch_device=torch_device,
+                checkpoint_classifier = decoder_model,
+
+            )
 
             batch_groups.append(pred_molecule_list)
             batch_scores.append(scores)
@@ -163,16 +157,16 @@ def main(args):
             true_mol, true_n_dummy_atoms = build_molecule(
                 true_mol[0], true_mol[1], dataset_infos.atom_decoder, return_n_dummy_atoms=True
             )
-            true_smi = Chem.MolToSmiles(true_mol)
+            true_smi = Chem.MolToSmiles(true_mol) # type: ignore
 
             product_mol = build_molecule(product_mol[0], product_mol[1], dataset_infos.atom_decoder)
-            product_smi = Chem.MolToSmiles(product_mol)
+            product_smi = Chem.MolToSmiles(product_mol) # type: ignore
 
             for pred_mol, pred_score, nll, ell in zip(pred_mols, pred_scores, nlls, ells):
                 pred_mol, n_dummy_atoms = build_molecule(
                     pred_mol[0], pred_mol[1], dataset_infos.atom_decoder, return_n_dummy_atoms=True
                 )
-                pred_smi = Chem.MolToSmiles(pred_mol)
+                pred_smi = Chem.MolToSmiles(pred_mol) # type: ignore
                 true_molecules_smiles.append(true_smi)
                 product_molecules_smiles.append(product_smi)
                 pred_molecules_smiles.append(pred_smi)
@@ -200,7 +194,8 @@ if __name__ == '__main__':
     disable_rdkit_logging()
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=argparse.FileType(mode='r'), required=True)
-    parser.add_argument('--checkpoint', action='store', type=str, required=True)
+    parser.add_argument('--checkpoint_decoder', action='store', type=str, required=True)
+    parser.add_argument('--checkpoint_classifier', action='store', type=str, required=True)
     parser.add_argument('--samples', action='store', type=str, required=True)
     parser.add_argument('--model', action='store', type=str, required=True)
     parser.add_argument('--mode', action='store', type=str, required=True)

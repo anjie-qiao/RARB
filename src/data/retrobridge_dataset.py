@@ -12,7 +12,7 @@ from torch_geometric.data import Data, InMemoryDataset
 from torch_geometric.loader import DataLoader
 from tqdm import tqdm
 from typing import Any, Sequence
-from rdkit.Chem import rdFMCS
+
 from pdb import set_trace
 
 DOWNLOAD_URL_TEMPLATE = 'https://zenodo.org/record/8114657/files/{fname}?download=1'
@@ -59,8 +59,6 @@ class RetroBridgeDataset(InMemoryDataset):
             self.data = Data(
                 x=self.data.p_x, edge_index=self.data.p_edge_index, edge_attr=self.data.p_edge_attr,
                 p_x=self.data.x, p_edge_index=self.data.edge_index, p_edge_attr=self.data.edge_attr,
-                context_x=self.data.context_x, context_edge_index=self.data.context_edge_index,
-                context_edge_attr=self.data.context_edge_attr,
                 y=self.data.y, idx=self.data.idx, r_smiles=self.data.p_smiles, p_smiles=self.data.r_smiles,
             )
             self.slices = {
@@ -72,11 +70,6 @@ class RetroBridgeDataset(InMemoryDataset):
                 'p_x': self.slices['x'],
                 'p_edge_index': self.slices['edge_index'],
                 'p_edge_attr': self.slices['edge_attr'],
-
-                'context_x': self.slices['context_x'],
-                'context_edge_index': self.slices['context_edge_index'],
-                'context_edge_attr': self.slices['context_edge_attr'],
-
                 'r_smiles': self.slices['p_smiles'],
                 'p_smiles': self.slices['r_smiles'],
             }
@@ -120,9 +113,6 @@ class RetroBridgeDataset(InMemoryDataset):
             reactants_smi, _, product_smi = reaction_smiles.split('>')
             rmol = Chem.MolFromSmiles(reactants_smi)
             pmol = Chem.MolFromSmiles(product_smi)
-
-            mcs_mol = Chem.MolFromSmarts(rdFMCS.FindMCS([rmol, pmol]).smartsString)  # Maximum Common Substructure
-
             r_num_nodes = rmol.GetNumAtoms()
             p_num_nodes = pmol.GetNumAtoms()
             assert p_num_nodes <= r_num_nodes
@@ -145,10 +135,10 @@ class RetroBridgeDataset(InMemoryDataset):
             try:
                 mapping = self.compute_nodes_order_mapping(rmol)
                 r_x, r_edge_index, r_edge_attr = self.compute_graph(
-                    rmol, mapping, r_num_nodes, types=self.types, bonds=self.bonds,
+                    rmol, mapping, r_num_nodes, types=self.types, bonds=self.bonds
                 )
-                p_x, p_edge_index, p_edge_attr, context_x, context_edge_index, context_edge_attr = self.compute_graph_context(
-                    pmol, mapping, r_num_nodes, types=self.types, bonds=self.bonds, mcs=mcs_mol
+                p_x, p_edge_index, p_edge_attr = self.compute_graph(
+                    pmol, mapping, r_num_nodes, types=self.types, bonds=self.bonds
                 )
             except Exception as e:
                 print(f'Error processing molecule {i}: {e}')
@@ -179,12 +169,6 @@ class RetroBridgeDataset(InMemoryDataset):
                 p_edge_index = torch.stack([old2new_idx[p_edge_index[0]], old2new_idx[p_edge_index[1]]], dim=0)
                 p_edge_index, p_edge_attr = self.sort_edges(p_edge_index, p_edge_attr, r_num_nodes)
 
-                context_x = context_x[new2old_idx]
-                context_edge_index = torch.stack(
-                    [old2new_idx[context_edge_index[0]], old2new_idx[context_edge_index[1]]], dim=0)
-                context_edge_index, context_edge_attr = self.sort_edges(context_edge_index, context_edge_attr,
-                                                                        r_num_nodes)
-
                 product_mask = ~(p_x[:, -1].bool()).squeeze()
                 assert torch.allclose(r_x[product_mask], p_x[product_mask])
 
@@ -192,7 +176,6 @@ class RetroBridgeDataset(InMemoryDataset):
             data = Data(
                 x=r_x, edge_index=r_edge_index, edge_attr=r_edge_attr, y=y, idx=i,
                 p_x=p_x, p_edge_index=p_edge_index, p_edge_attr=p_edge_attr,
-                context_x=context_x, context_edge_index=context_edge_index, context_edge_attr=context_edge_attr,
                 r_smiles=reactants_smi, p_smiles=product_smi,
             )
 
@@ -225,38 +208,6 @@ class RetroBridgeDataset(InMemoryDataset):
         edge_attr = F.one_hot(edge_type, num_classes=len(bonds) + 1).to(torch.float)
 
         return x, edge_index, edge_attr
-
-    @staticmethod
-    def compute_graph_context(molecule, mapping, max_num_nodes, types, bonds, mcs):
-        max_num_nodes = max(molecule.GetNumAtoms(), max_num_nodes)  # in case |reactants|-|product| > max_n_dummy_nodes
-        atom_indices = molecule.GetSubstructMatch(mcs)
-
-        type_idx = [len(types) - 1] * max_num_nodes
-        type_flag = [0] * max_num_nodes
-        for i, atom in enumerate(molecule.GetAtoms()):
-            type_idx[mapping[atom.GetAtomMapNum()]] = types[atom.GetSymbol()]
-            type_flag[mapping[atom.GetAtomMapNum()]] = 1 if atom.GetIdx() in atom_indices else 0
-        num_classes = len(types)
-        x = F.one_hot(torch.tensor(type_idx), num_classes=num_classes).float()
-        context_x = torch.cat([x, torch.tensor(type_flag).unsqueeze(-1)], dim=-1)
-
-        row, col, edge_type, edge_flag = [], [], [], []
-        for bond in molecule.GetBonds():
-            start_atom_map_num = molecule.GetAtomWithIdx(bond.GetBeginAtomIdx()).GetAtomMapNum()
-            end_atom_map_num = molecule.GetAtomWithIdx(bond.GetEndAtomIdx()).GetAtomMapNum()
-            start, end = mapping[start_atom_map_num], mapping[end_atom_map_num]
-            row += [start, end]
-            col += [end, start]
-            edge_type += 2 * [bonds[bond.GetBondType()] + 1]
-            edge_flag += 2 * [1 if start_atom_map_num in atom_indices and end_atom_map_num in atom_indices else 0]
-
-        edge_index = torch.tensor([row, col], dtype=torch.long)
-        edge_type = torch.tensor(edge_type, dtype=torch.long)
-        edge_attr = F.one_hot(edge_type, num_classes=len(bonds) + 1).to(torch.float)
-        context_edge_attr = torch.cat([edge_attr, torch.tensor(edge_flag).unsqueeze(-1)], dim=-1)
-        context_edge_index = edge_index
-
-        return x, edge_index, edge_attr, context_x, context_edge_index, context_edge_attr
 
     @staticmethod
     def compute_nodes_order_mapping(molecule):
@@ -475,8 +426,8 @@ class RetroBridgeDatasetInfos:
         self.input_dims['y'] += ex_extra_molecular_feat.y.size(-1)
 
         if use_context:
-            self.input_dims['X'] += (example_batch['x'].size(1) + 1)
-            self.input_dims['E'] += (example_batch['p_edge_attr'].size(1) + 1)
+            self.input_dims['X'] += example_batch['x'].size(1)
+            self.input_dims['E'] += example_batch['p_edge_attr'].size(1)
 
         self.output_dims = {
             'X': example_batch['x'].size(1),
