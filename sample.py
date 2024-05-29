@@ -70,8 +70,6 @@ def main(args):
     decoder_model.eval().to(torch_device)
     decoder_model.visualization_tools = None
     decoder_model.T = args.n_steps
-
-    
   
     group_size = args.n_samples
 
@@ -101,6 +99,20 @@ def main(args):
 
         ground_truth = []
         input_products = []
+
+        # # random select 15% ground truth node to filp
+        # context, c_node_mask = utils.to_dense(data.context_x, data.context_edge_index, data.context_edge_attr,
+        #                                       data.batch)
+        # context = context.mask(c_node_mask)
+        # #(bs, n, 1)
+        # px_label = context.X[:,:,-1].unsqueeze(-1)
+        # #(bs, n)
+        # px_mask = torch.rand(px_label.shape) < 0.15
+        # px_label[px_mask] = 1 - px_label[px_mask]
+
+        ##normal gaussian
+        #px_label = torch.randn(px_label.shape)
+
         for sample_idx in range(group_size):
             data = data.to(torch_device)
             
