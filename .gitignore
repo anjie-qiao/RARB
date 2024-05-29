@@ -5,6 +5,6 @@ checkpoints/
 /data/
 RetroClassifier/
 samples/
-models/
+/models/
 ckpt_classifier/
 X_output.csv/
