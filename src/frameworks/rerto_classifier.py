@@ -111,11 +111,11 @@ class RertoClassifier(pl.LightningModule):
 
 
     def training_step(self, data, i):
-        product, node_mask, pred_label, product_label,original_edge_indices,dummy_node_mask= self.process_and_forward(data)
-        
+        product, node_mask, pred_label, product_label, edge_mask, new_node_mask= self.process_and_forward(data)
+        pred_label['X_flat'] = pred_label['X'][new_node_mask]
+        pred_label['E_flat'] = pred_label['E'][~edge_mask]
         return self.compute_training_loss(product_label, pred_label, i, self.enc_node_loss, self.enc_edge_loss)
 
-    
     def compute_training_loss(self, product_label, pred_label, i, enc_node_loss, enc_edge_loss):
         loss = self.train_loss(product_label, pred_label, enc_node_loss, enc_edge_loss)
         if i % self.log_every_steps == 0:
@@ -129,7 +129,9 @@ class RertoClassifier(pl.LightningModule):
         return {'loss': loss}
 
     def validation_step(self, data, i):
-        product, node_mask, pred_label, product_label,original_edge_indices,dummy_node_mask = self.process_and_forward(data)
+        product, node_mask, pred_label, product_label, edge_mask, new_node_mask = self.process_and_forward(data)
+        pred_label['X_flat'] = pred_label['X'][new_node_mask]
+        pred_label['E_flat'] = pred_label['E'][~edge_mask]
         return self.compute_validation_loss(product_label, pred_label, i, self.enc_node_loss, self.enc_edge_loss)
 
     def on_validation_epoch_end(self):
@@ -156,30 +158,25 @@ class RertoClassifier(pl.LightningModule):
         for data in tqdm(dataloader, total=total_batch):
             data = data.to(self.device)
         
-            product, node_mask, pred_label, product_label, edge_mask, dummy_node_mask = self.process_and_forward(data)
+            product, node_mask, pred_label, product_label, edge_mask, new_node_mask = self.process_and_forward(data)
 
+            #(bs, n, )
             node_predicted_labels = torch.argmax(pred_label['X'], dim=-1)
-            node_labels_expanded = torch.full_like(product_label['X'][node_mask], fill_value=0, dtype=torch.long)
-            node_labels_expanded[dummy_node_mask] = node_predicted_labels 
-
-            restored_node_labels = torch.zeros_like(product_label['X'], dtype=torch.long) 
-            restored_node_labels[node_mask] = node_labels_expanded
-
-            edge_predicted_labels = torch.argmax(pred_label['E'], dim=-1)
-            #edge_predicted_labels = product_label['E_flat'].long()
             #(bs, n, n, )
-            edge_labels = torch.full(product.E.shape[:-1], fill_value=0, dtype=torch.long, device=self.device)  
-            edge_labels[~edge_mask] = edge_predicted_labels
+            edge_predicted_labels = torch.argmax(pred_label['E'], dim=-1)
             
-            node_comparison_nozero = torch.argmax(pred_label['X'], dim=-1) == product_label['X_flat'].squeeze(-1)
-            node_comparison_single = restored_node_labels == product_label['X'].squeeze(-1)
+            node_predicted_labels[~new_node_mask] = 0
+            edge_predicted_labels = edge_predicted_labels[edge_mask] = 0
 
+            #(compactN,)
+            node_comparison_nozero =  node_predicted_labels[new_node_mask] == product_label['X_flat']
+            node_comparison_single = node_predicted_labels == product_label['X'].squeeze(-1)
             node_correct = torch.all(node_comparison_single, dim=1)
-            
-            edge_comparison = edge_labels == product_label['E'].squeeze(-1)
+            edge_comparison = edge_predicted_labels == product_label['E'].squeeze(-1)
             edge_comparison_flat = edge_comparison.view(edge_comparison.size(0), -1)
             edge_correct = torch.all(edge_comparison_flat, dim=1)
-            edge_com_nozero = torch.argmax(pred_label['E'], dim=-1) == product_label['E_flat'].squeeze(-1)
+
+            edge_com_nozero = edge_predicted_labels[~edge_mask] == product_label['E_flat']
 
             graph_correct = node_correct & edge_correct
             node_correct_all = torch.cat([node_correct_all,node_correct], dim = -1)
@@ -202,7 +199,6 @@ class RertoClassifier(pl.LightningModule):
         self.log(f'val_accuracy/single_node', accuracy_node_single)
         self.log(f'val_accuracy/single_edge', accuracy_edge__single)
      
-
     def process_and_forward(self, data):
     
         product, p_node_mask = utils.to_dense(data.p_x, data.p_edge_index, data.p_edge_attr, data.batch)
@@ -215,38 +211,36 @@ class RertoClassifier(pl.LightningModule):
             'E':context.E[:,:,:,-1],
         }
         node_mask = p_node_mask
-        dummy_node_mask = product.X[node_mask][:,-1] != 1
-
-        product_label['X_flat'] = product_label['X'][node_mask]
-        product_label['X_flat'] = product_label['X_flat'][dummy_node_mask]
-
+        dummy_node_mask = product.X[...,-1] != 1
+        new_node_mask = node_mask & dummy_node_mask 
+        #(compactN,)
+        product_label['X_flat'] = product_label['X'][new_node_mask]
+        
         original_product = product.clone()
         original_product.E = utils.decode_no_edge(original_product.E)
-        #(bs, n, n)
+        #(bs,n,n)
         edge_mask = (original_product.E == 0).all(dim=-1)
         #(compactN,)
         product_label['E_flat'] = product_label['E'][~edge_mask]
-        
+   
         #print("node_1: ", (product_label['X_flat'].view(-1) == 1).sum().item(),"node_0: ", (product_label['X_flat'].view(-1) == 0).sum().item(), "num:", product_label['X_flat'].numel())
         #print("edge_1: ", (product_label['E_flat'].view(-1) == 1).sum().item(),"edge_0: ", (product_label['E_flat'].view(-1) == 0).sum().item(),"num:",product_label['E_flat'].numel())
 
         product_data = {'X_t': product.X, 'E_t': product.E, 'y_t': product.y, 't': None, 'node_mask': node_mask}
         product_extra_data = self.compute_extra_data(product_data)
-        pred_label = self.forward(product, product_extra_data, node_mask, edge_mask, dummy_node_mask)
-        return product, node_mask, pred_label, product_label, edge_mask, dummy_node_mask
+        pred_label = self.forward(product, product_extra_data, node_mask, edge_mask, new_node_mask)
+        return product, node_mask, pred_label, product_label, edge_mask, new_node_mask
 
-    def forward(self,product, product_extra_data, node_mask, edge_mask, dummy_node_mask):
+    def forward(self,product, product_extra_data, node_mask, edge_mask, new_node_mask):
         p_X = torch.cat((product.X, product_extra_data.X), dim=2).float()
         p_E = torch.cat((product.E, product_extra_data.E), dim=3).float()
         p_y = torch.hstack((product.y, product_extra_data.y)).float()
         enc_input = self.encoder_model(p_X, p_E, p_y, node_mask)
-
-        compact_E = enc_input.E[~edge_mask]
-        compact_X = enc_input.X[node_mask]
-        compact_X = compact_X[dummy_node_mask]
-      
-        pred_label = self.classifier(compact_X, compact_E)
-   
+        #(bs,n,k)
+        classifier_X = torch.where(new_node_mask.unsqueeze(-1), enc_input.X, 0.0)
+        #(bs,n,n,k)
+        classifier_E = torch.where(~edge_mask.unsqueeze(-1), enc_input.E, 0.0)
+        pred_label = self.classifier(classifier_X, classifier_E)
         return  pred_label
     
     @torch.no_grad()

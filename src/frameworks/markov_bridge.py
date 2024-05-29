@@ -5,6 +5,7 @@
 
 
 from ctypes.wintypes import PINT
+from curses import noecho
 from multiprocessing import context
 from xml.sax.handler import property_interning_dict
 import torch
@@ -465,8 +466,8 @@ class MarkovBridge(pl.LightningModule):
             sample_idx,
             save_true_reactants=True,
             use_one_hot=False,
-            torch_device = None,
-            checkpoint_classifier = None,
+            product=None, 
+            context=None,
     ):
         """
         :param data
@@ -488,8 +489,8 @@ class MarkovBridge(pl.LightningModule):
             number_chain_steps_to_save=number_chain_steps_to_save,
             save_true_reactants=save_true_reactants,
             use_one_hot=use_one_hot,
-            torch_device = torch_device,
-            checkpoint_classifier = checkpoint_classifier,
+            product=product, 
+            context=context,
         )
 
         if self.visualization_tools is not None:
@@ -508,18 +509,18 @@ class MarkovBridge(pl.LightningModule):
 
     def sample_chain(
             self, data, batch_size, keep_chain, number_chain_steps_to_save, save_true_reactants, use_one_hot=False,
-            torch_device=None, checkpoint_classifier=None
+            product=None, context=None,
     ):
         
         # Context product
-        product, node_mask = utils.to_dense(data.p_x, data.p_edge_index, data.p_edge_attr, data.batch)
-        product = product.mask(node_mask)
+        # product, node_mask = utils.to_dense(data.p_x, data.p_edge_index, data.p_edge_attr, data.batch)
+        # product = product.mask(node_mask)
 
-        context, c_node_mask = utils.to_dense(data.context_x, data.context_edge_index, data.context_edge_attr,
-                                              data.batch)
-        context = context.mask(c_node_mask)
+        # context, c_node_mask = utils.to_dense(data.context_x, data.context_edge_index, data.context_edge_attr,
+        #                                       data.batch)
+        # context = context.mask(c_node_mask)
         
-        px_label = context.X[:,:,-1].unsqueeze(-1)
+        # px_label = context.X[:,:,-1].unsqueeze(-1)
         # pe_label = context.E[:,:,:,-1].unsqueeze(-1)
         # p_node_comparison = product.X  == context.X[:,:,:-1]
         # p_node_comparison_flat = p_node_comparison.view(p_node_comparison.size(0), -1)
@@ -531,47 +532,46 @@ class MarkovBridge(pl.LightningModule):
         # print("p_edge_accuracy: ",p_edge_correct.float().mean().item())
  
         # Discrete context product
-        product_discrete, _ = utils.to_dense(data.p_x, data.p_edge_index, data.p_edge_attr, data.batch)
-        product_discrete = product_discrete.mask(node_mask, collapse=True)
+        # product_discrete, _ = utils.to_dense(data.p_x, data.p_edge_index, data.p_edge_attr, data.batch)
+        # product_discrete = product_discrete.mask(node_mask, collapse=True)
         
-        dummy_node_mask = product.X[node_mask][:,-1] != 1
+        # dummy_node_mask = product.X[node_mask][:,-1] != 1
 
-        original_product = product.clone()
-        original_product.E = utils.decode_no_edge(original_product.E)
-        #(bs,n,n)
-        edge_mask = (original_product.E == 0).all(dim=-1)
+        # original_product = product.clone()
+        # original_product.E = utils.decode_no_edge(original_product.E)
+        # #(bs,n,n)
+        # edge_mask = (original_product.E == 0).all(dim=-1)
 
-        product_data = {'X_t': product.X, 'E_t': product.E, 'y_t': product.y, 't': None, 'node_mask': node_mask}
-        product_extra_data = self.compute_extra_data(product_data, context=None, condition_on_t=False)
+        # product_data = {'X_t': product.X, 'E_t': product.E, 'y_t': product.y, 't': None, 'node_mask': node_mask}
+        # product_extra_data = self.compute_extra_data(product_data, context=None, condition_on_t=False)
 
-        pred_label = checkpoint_classifier.forward(product, product_extra_data, node_mask, edge_mask, dummy_node_mask)
+        # pred_label = checkpoint_classifier.forward(product, product_extra_data, node_mask, edge_mask, dummy_node_mask)
 
-        node_predicted_labels = torch.argmax(pred_label['X'], dim=-1)   
-        node_labels_expanded = torch.full_like(product.X[:,:,-1][node_mask], fill_value=0, dtype=torch.long)
-        node_labels_expanded[dummy_node_mask] = node_predicted_labels 
+        # node_predicted_labels = torch.argmax(pred_label['X'], dim=-1)   
+        # node_labels_expanded = torch.full_like(product.X[:,:,-1][node_mask], fill_value=0, dtype=torch.long)
+        # node_labels_expanded[dummy_node_mask] = node_predicted_labels 
 
-        restored_node_labels = torch.zeros_like(product.X[:,:,-1], dtype=torch.long)
-        restored_node_labels[node_mask] = node_labels_expanded
+        # restored_node_labels = torch.zeros_like(product.X[:,:,-1], dtype=torch.long)
+        # restored_node_labels[node_mask] = node_labels_expanded
 
-        edge_predicted_labels = torch.argmax(pred_label['E'], dim=-1)
-        #edge_predicted_labels = product_label['E_flat'].long()
-        #(bs, n, n, )
-        edge_labels = torch.full(product.E.shape[:-1], fill_value=0, dtype=torch.long, device=self.device)  
-        edge_labels[~edge_mask] = edge_predicted_labels
+        # edge_predicted_labels = torch.argmax(pred_label['E'], dim=-1)
+        # #edge_predicted_labels = product_label['E_flat'].long()
+        # #(bs, n, n, )
+        # edge_labels = torch.full(product.E.shape[:-1], fill_value=0, dtype=torch.long, device=self.device)  
+        # edge_labels[~edge_mask] = edge_predicted_labels
       
         
-        node_correct = torch.all(restored_node_labels.unsqueeze(-1) == px_label, dim=1)
-        # edge_comparison = torch.argmax(pred_label['E'], dim=-1) == pe_label
-        # edge_comparison_flat = edge_comparison.view(edge_comparison.size(0), -1)
-        # edge_correct = torch.all(edge_comparison_flat, dim=1)
-        print("node_accuracy: ",node_correct.float().mean().item())
-        # print("edge_accuracy: ",edge_correct.float().mean().item())
-        # # Creating context
+        # # edge_comparison = torch.argmax(pred_label['E'], dim=-1) == pe_label
+        # # edge_comparison_flat = edge_comparison.view(edge_comparison.size(0), -1)
+        # # edge_correct = torch.all(edge_comparison_flat, dim=1)
+        # #print("node_accuracy: ",node_correct.float().mean().item())
+        # # print("edge_accuracy: ",edge_correct.float().mean().item())
+        # # # Creating context
 
-        context = product.clone()
-        context.X = torch.cat([context.X, restored_node_labels.unsqueeze(-1)], dim = -1)
-        context.E = torch.cat([context.E, edge_labels], dim = -1)  
-        context = context.mask(node_mask)      
+        # context = product.clone()
+        # context.X = torch.cat([context.X, restored_node_labels.unsqueeze(-1)], dim = -1)
+        # context.E = torch.cat([context.E, edge_labels], dim = -1)  
+        # context = context.mask(node_mask)      
         
         # context = product.clone() if self.use_context else None
 

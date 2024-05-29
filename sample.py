@@ -87,6 +87,8 @@ def main(args):
     dataloader = datamodule.test_dataloader() if args.mode == 'test' else datamodule.val_dataloader()
 
     for i, data in enumerate(tqdm(dataloader)):
+        data = data.to(torch_device)
+
         if i * args.batch_size < skip_first_n:
             continue
 
@@ -100,23 +102,50 @@ def main(args):
         ground_truth = []
         input_products = []
 
-        # # random select 15% ground truth node to filp
-        # context, c_node_mask = utils.to_dense(data.context_x, data.context_edge_index, data.context_edge_attr,
-        #                                       data.batch)
-        # context = context.mask(c_node_mask)
-        # #(bs, n, 1)
-        # px_label = context.X[:,:,-1].unsqueeze(-1)
-        # #(bs, n)
-        # px_mask = torch.rand(px_label.shape) < 0.15
-        # px_label[px_mask] = 1 - px_label[px_mask]
+        product, node_mask = utils.to_dense(data.p_x, data.p_edge_index, data.p_edge_attr, data.batch)
+        product = product.mask(node_mask)
+        context, c_node_mask = utils.to_dense(data.context_x, data.context_edge_index, data.context_edge_attr, data.batch)
+        context = context.mask(c_node_mask)
+        #(bs, n, 1)
+        px_label = context.X[:,:,-1].unsqueeze(-1)
+        #(bs, n, n, 1)
+        pe_label = context.E[:,:,:,-1].unsqueeze(-1)
+        #(ba,n)
+        dummy_node_mask = product.X[...,-1] != 1
+        new_node_mask = node_mask & dummy_node_mask 
 
-        ##normal gaussian
-        #px_label = torch.randn(px_label.shape)
+        original_product = product.clone()
+        original_product.E = utils.decode_no_edge(original_product.E)
+        #(bs,n,n)
+        edge_mask = (original_product.E == 0).all(dim=-1)
+
+        product_data = {'X_t': product.X, 'E_t': product.E, 'y_t': product.y, 't': None, 'node_mask': node_mask}
+        product_extra_data = decoder_model.compute_extra_data(product_data, context=None, condition_on_t=False)
+        pred_label = classifier_model.forward(product, product_extra_data, node_mask, edge_mask, new_node_mask)
+
+        #(bs,n,)
+        node_predicted_labels = torch.argmax(pred_label['X'], dim=-1)   
+        #(bs,n,n)
+        edge_predicted_labels = torch.argmax(pred_label['E'], dim=-1)
+        #(bs,n,n,)
+        edge_labels = torch.where(~edge_mask,edge_predicted_labels,0)
+      
+        # mark the correct graph or not 
+        # (bs,)
+        node_correct = torch.all(node_predicted_labels.unsqueeze(-1) == px_label, dim=1)
+        # (bs,n)  randomly filp the ground truth node labels of graph with incorrect prediction 
+        not_all_correct = node_predicted_labels[node_correct]
+        nac_mask = torch.rand(not_all_correct.shape) < 0.3
+        not_all_correct[nac_mask] = 1- not_all_correct[nac_mask]
+        node_predicted_labels[node_correct] = not_all_correct
+
+        #create context and add labels
+        context = product.clone()
+        context.X = torch.cat([context.X, node_predicted_labels], dim = -1)
+        context.E = torch.cat([context.E, pe_label], dim = -1)  
+        context = context.mask(node_mask)   
 
         for sample_idx in range(group_size):
-            data = data.to(torch_device)
-            
-
             pred_molecule_list, true_molecule_list, products_list, scores, nlls, ells, node_correct = decoder_model.sample_batch(
                 data=data,
                 batch_id=ident,
@@ -128,8 +157,8 @@ def main(args):
                 save_true_reactants=True,
                 use_one_hot=args.use_one_hot,
 
-                torch_device=torch_device,
-                checkpoint_classifier = classifier_model,
+                product=product, 
+                context=context,
 
             )
 
