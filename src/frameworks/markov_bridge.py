@@ -1,8 +1,19 @@
+
+
+
+
+
+
+from ctypes.wintypes import PINT
+from curses import noecho
+from multiprocessing import context
+from xml.sax.handler import property_interning_dict
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import pytorch_lightning as pl
+import pytorch_lightning as pl  # type: ignore
 import os
+import time
 
 from src.data import utils
 from src.frameworks.noise_schedule import InterpolationTransition, PredefinedNoiseScheduleDiscrete
@@ -10,6 +21,9 @@ from src.frameworks import diffusion_utils
 from src.metrics.train_metrics import TrainLossDiscrete, TrainLossVLB
 from src.metrics.sampling_metrics import compute_retrosynthesis_metrics
 from src.models.transformer_model import GraphTransformer
+
+from RetroClassifier.src.frameworks.rerto_classifier import RertoClassifier
+
 
 from sklearn.metrics import roc_auc_score
 from tqdm import tqdm
@@ -147,6 +161,10 @@ class MarkovBridge(pl.LightningModule):
         product, p_node_mask = utils.to_dense(data.p_x, data.p_edge_index, data.p_edge_attr, data.batch)
         product = product.mask(p_node_mask)
 
+        context, c_node_mask = utils.to_dense(data.context_x, data.context_edge_index, data.context_edge_attr,
+                                              data.batch)
+        context = context.mask(c_node_mask)
+
         assert torch.allclose(r_node_mask, p_node_mask)
         node_mask = r_node_mask
 
@@ -159,7 +177,7 @@ class MarkovBridge(pl.LightningModule):
         )
 
         # Computing extra features + context and making predictions
-        context = product.clone() if self.use_context else None
+        # context = product.clone() if self.use_context else None
         extra_data = self.compute_extra_data(noisy_data, context=context)
         pred = self.forward(noisy_data, extra_data, node_mask)
 
@@ -299,7 +317,7 @@ class MarkovBridge(pl.LightningModule):
         else:
             return self.compute_validation_CE_loss(reactants=reactants, pred=pred, i=i)
 
-    def on_validation_epoch_end(self, outs):
+    def on_validation_epoch_end(self):
         self.val_counter += 1
         if self.val_counter % self.sample_every_val == 0:
             self.sample()
@@ -448,6 +466,8 @@ class MarkovBridge(pl.LightningModule):
             sample_idx,
             save_true_reactants=True,
             use_one_hot=False,
+            product=None, 
+            context=None,
     ):
         """
         :param data
@@ -462,13 +482,15 @@ class MarkovBridge(pl.LightningModule):
         :return: molecule_list. Each element of this list is a tuple (atom_types, charges, positions)
         """
 
-        chain_X, chain_E, true_molecule_list, products_list, molecule_list, _, nll, ell = self.sample_chain(
+        chain_X, chain_E, true_molecule_list, products_list, molecule_list, _, nll, ell, node_correct = self.sample_chain(
             data=data,
             batch_size=batch_size,
             keep_chain=keep_chain,
             number_chain_steps_to_save=number_chain_steps_to_save,
             save_true_reactants=save_true_reactants,
             use_one_hot=use_one_hot,
+            product=product, 
+            context=context,
         )
 
         if self.visualization_tools is not None:
@@ -483,74 +505,75 @@ class MarkovBridge(pl.LightningModule):
                 save_final=save_final
             )
 
-        return molecule_list, true_molecule_list, products_list, [0] * len(molecule_list), nll, ell
-
-    def sample_chain_no_true_no_save(self, data, batch_size, use_one_hot=False):
-        # Context product
-        product, node_mask = utils.to_dense(data.p_x, data.p_edge_index, data.p_edge_attr, data.batch)
-        product = product.mask(node_mask)
-
-        # Creating context
-        context = product.clone() if self.use_context else None
-
-        # Masks for fixed and modifiable nodes
-        fixed_nodes = (product.X[..., -1] == 0).unsqueeze(-1)
-        modifiable_nodes = (product.X[..., -1] == 1).unsqueeze(-1)
-        assert torch.all(fixed_nodes | modifiable_nodes)
-
-        # z_T – starting state (product)
-        X, E, y = product.X, product.E, torch.empty((node_mask.shape[0], 0), device=self.device)
-
-        assert (E == torch.transpose(E, 1, 2)).all()
-
-        # Iteratively sample p(z_s | z_t) for t = 1, ..., T, with s = t - 1.
-        for s_int in tqdm(reversed(range(0, self.T)), total=self.T):
-            s_array = s_int * torch.ones((batch_size, 1)).type_as(y)
-            t_array = s_array + 1
-            s_norm = s_array / self.T
-            t_norm = t_array / self.T
-
-            # Sample z_s
-            sampled_s, discrete_sampled_s, node_log_likelihood, edge_log_likelihood = self.sample_p_zs_given_zt(
-                s=s_norm,
-                t=t_norm,
-                X_t=X,
-                E_t=E,
-                y_t=y,
-                X_T=product.X,
-                E_T=product.E,
-                y_T=product.y,
-                node_mask=node_mask,
-                context=context,
-                use_one_hot=use_one_hot,
-            )
-
-            # Masking unchanged part
-            if self.fix_product_nodes:
-                sampled_s.X = sampled_s.X * modifiable_nodes + product.X * fixed_nodes
-                sampled_s = sampled_s.mask(node_mask)
-
-            X, E, y = sampled_s.X, sampled_s.E, sampled_s.y
-
-        sampled_s = sampled_s.mask(node_mask, collapse=True)
-        X, E, y = sampled_s.X, sampled_s.E, sampled_s.y
-        molecule_list = utils.create_pred_reactant_molecules(X, E, data.batch, batch_size)
-
-        return molecule_list
+        return molecule_list, true_molecule_list, products_list, [0] * len(molecule_list), nll, ell, node_correct
 
     def sample_chain(
-            self, data, batch_size, keep_chain, number_chain_steps_to_save, save_true_reactants, use_one_hot=False
+            self, data, batch_size, keep_chain, number_chain_steps_to_save, save_true_reactants, use_one_hot=False,
+            product=None, context=None,
     ):
+        
         # Context product
-        product, node_mask = utils.to_dense(data.p_x, data.p_edge_index, data.p_edge_attr, data.batch)
-        product = product.mask(node_mask)
+        # product, node_mask = utils.to_dense(data.p_x, data.p_edge_index, data.p_edge_attr, data.batch)
+        # product = product.mask(node_mask)
 
+        # context, c_node_mask = utils.to_dense(data.context_x, data.context_edge_index, data.context_edge_attr,
+        #                                       data.batch)
+        # context = context.mask(c_node_mask)
+        
+        # px_label = context.X[:,:,-1].unsqueeze(-1)
+        # pe_label = context.E[:,:,:,-1].unsqueeze(-1)
+        # p_node_comparison = product.X  == context.X[:,:,:-1]
+        # p_node_comparison_flat = p_node_comparison.view(p_node_comparison.size(0), -1)
+        # p_node_correct = torch.all(p_node_comparison_flat, dim=1)
+        # p_edge_comparison = product.E == context.E[:,:,:,:-1]
+        # p_edge_comparison_flat = p_edge_comparison.view(p_edge_comparison.size(0), -1)
+        # p_edge_correct = torch.all(p_edge_comparison_flat, dim=1)
+        # print("p_node_accuracy: ",p_node_correct.float().mean().item())
+        # print("p_edge_accuracy: ",p_edge_correct.float().mean().item())
+ 
         # Discrete context product
-        product_discrete, _ = utils.to_dense(data.p_x, data.p_edge_index, data.p_edge_attr, data.batch)
-        product_discrete = product_discrete.mask(node_mask, collapse=True)
+        # product_discrete, _ = utils.to_dense(data.p_x, data.p_edge_index, data.p_edge_attr, data.batch)
+        # product_discrete = product_discrete.mask(node_mask, collapse=True)
+        
+        # dummy_node_mask = product.X[node_mask][:,-1] != 1
 
-        # Creating context
-        context = product.clone() if self.use_context else None
+        # original_product = product.clone()
+        # original_product.E = utils.decode_no_edge(original_product.E)
+        # #(bs,n,n)
+        # edge_mask = (original_product.E == 0).all(dim=-1)
+
+        # product_data = {'X_t': product.X, 'E_t': product.E, 'y_t': product.y, 't': None, 'node_mask': node_mask}
+        # product_extra_data = self.compute_extra_data(product_data, context=None, condition_on_t=False)
+
+        # pred_label = checkpoint_classifier.forward(product, product_extra_data, node_mask, edge_mask, dummy_node_mask)
+
+        # node_predicted_labels = torch.argmax(pred_label['X'], dim=-1)   
+        # node_labels_expanded = torch.full_like(product.X[:,:,-1][node_mask], fill_value=0, dtype=torch.long)
+        # node_labels_expanded[dummy_node_mask] = node_predicted_labels 
+
+        # restored_node_labels = torch.zeros_like(product.X[:,:,-1], dtype=torch.long)
+        # restored_node_labels[node_mask] = node_labels_expanded
+
+        # edge_predicted_labels = torch.argmax(pred_label['E'], dim=-1)
+        # #edge_predicted_labels = product_label['E_flat'].long()
+        # #(bs, n, n, )
+        # edge_labels = torch.full(product.E.shape[:-1], fill_value=0, dtype=torch.long, device=self.device)  
+        # edge_labels[~edge_mask] = edge_predicted_labels
+      
+        
+        # # edge_comparison = torch.argmax(pred_label['E'], dim=-1) == pe_label
+        # # edge_comparison_flat = edge_comparison.view(edge_comparison.size(0), -1)
+        # # edge_correct = torch.all(edge_comparison_flat, dim=1)
+        # #print("node_accuracy: ",node_correct.float().mean().item())
+        # # print("edge_accuracy: ",edge_correct.float().mean().item())
+        # # # Creating context
+
+        # context = product.clone()
+        # context.X = torch.cat([context.X, restored_node_labels.unsqueeze(-1)], dim = -1)
+        # context.E = torch.cat([context.E, edge_labels], dim = -1)  
+        # context = context.mask(node_mask)      
+        
+        # context = product.clone() if self.use_context else None
 
         # Masks for fixed and modifiable nodes
         fixed_nodes = (product.X[..., -1] == 0).unsqueeze(-1)
@@ -613,10 +636,10 @@ class MarkovBridge(pl.LightningModule):
             ell += edge_log_likelihood
 
         # Save raw predictions for further scoring
-        pred = sampled_s.clone()
+        pred = sampled_s.clone()  # type: ignore
 
         # Sample
-        sampled_s = sampled_s.mask(node_mask, collapse=True)
+        sampled_s = sampled_s.mask(node_mask, collapse=True)  # type: ignore
         X, E, y = sampled_s.X, sampled_s.E, sampled_s.y
 
         # Prepare the chain for saving
@@ -644,6 +667,7 @@ class MarkovBridge(pl.LightningModule):
             chain_X, chain_E, true_molecule_list, products_list, molecule_list, pred,
             nll.detach().cpu().numpy().tolist(),
             ell.detach().cpu().numpy().tolist(),
+            node_correct,
         )
 
     def visualize(
@@ -697,7 +721,7 @@ class MarkovBridge(pl.LightningModule):
             suffix=f'_{sample_idx}'
         )
 
-    def sample_p_zs_given_zt(self, s, t, X_t, E_t, y_t, X_T, E_T, y_T, node_mask, context=None, use_one_hot=False):
+    def sample_p_zs_given_zt(self, s, t, X_t, E_t, y_t, X_T, E_T, y_T, node_mask, context=None, use_one_hot=False,):
         # Hack: in direct MB we consider flipped time flow
         bs, n = X_t.shape[:2]
         t = 1 - t
@@ -861,3 +885,61 @@ class MarkovBridge(pl.LightningModule):
             t = noisy_data['t']
             extra_y = torch.cat((extra_y, t), dim=1)
         return utils.PlaceHolder(X=extra_X, E=extra_E, y=extra_y)
+    
+    def sample_chain_no_true_no_save(self, data, batch_size, use_one_hot=False):
+        # Context product
+        product, node_mask = utils.to_dense(data.p_x, data.p_edge_index, data.p_edge_attr, data.batch)
+        product = product.mask(node_mask)
+
+        # Creating context
+        context, c_node_mask = utils.to_dense(data.context_x, data.context_edge_index, data.context_edge_attr,
+                                              data.batch)
+        context = context.mask(c_node_mask)
+        # context = product.clone() if self.use_context else None
+
+        # Masks for fixed and modifiable nodes
+        fixed_nodes = (product.X[..., -1] == 0).unsqueeze(-1)
+        modifiable_nodes = (product.X[..., -1] == 1).unsqueeze(-1)
+        assert torch.all(fixed_nodes | modifiable_nodes)
+
+        # z_T – starting state (product)
+        X, E, y = product.X, product.E, torch.empty((node_mask.shape[0], 0), device=self.device)
+
+        assert (E == torch.transpose(E, 1, 2)).all()
+
+        # Iteratively sample p(z_s | z_t) for t = 1, ..., T, with s = t - 1.
+        for s_int in tqdm(reversed(range(0, self.T)), total=self.T):
+            s_array = s_int * torch.ones((batch_size, 1)).type_as(y)
+            t_array = s_array + 1
+            s_norm = s_array / self.T
+            t_norm = t_array / self.T
+
+            # Sample z_s
+            sampled_s, discrete_sampled_s, node_log_likelihood, edge_log_likelihood = self.sample_p_zs_given_zt(
+                s=s_norm,
+                t=t_norm,
+                X_t=X,
+                E_t=E,
+                y_t=y,
+                X_T=product.X,
+                E_T=product.E,
+                y_T=product.y,
+                node_mask=node_mask,
+                context=context,
+                use_one_hot=use_one_hot,
+            )
+
+            # Masking unchanged part
+            if self.fix_product_nodes:
+                sampled_s.X = sampled_s.X * modifiable_nodes + product.X * fixed_nodes
+                sampled_s = sampled_s.mask(node_mask)
+
+            X, E, y = sampled_s.X, sampled_s.E, sampled_s.y
+
+        sampled_s = sampled_s.mask(node_mask, collapse=True)
+        X, E, y = sampled_s.X, sampled_s.E, sampled_s.y
+        molecule_list = utils.create_pred_reactant_molecules(X, E, data.batch, batch_size)
+
+        return molecule_list
+    
+  
