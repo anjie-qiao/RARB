@@ -2,7 +2,7 @@
 __pycache__
 logs/
 checkpoints/
-data/
+/data/
 RetroClassifier/
 samples/
 models/
