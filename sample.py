@@ -52,6 +52,7 @@ def main(args):
     classifier_model = classifier_model.load_from_checkpoint(args.checkpoint_classifier, map_location=torch_device)
     classifier_model.eval().to(torch_device)
     classifier_model.visualization_tools = None
+
     decoder_model = decoder_model.load_from_checkpoint(args.checkpoint_decoder, map_location=torch_device)
     
     datamodule = RetroBridgeDataModule(
@@ -83,6 +84,7 @@ def main(args):
     sampled_atom_nums = []
     computed_nlls = []
     computed_ells = []
+    computed_nc = []
 
     dataloader = datamodule.test_dataloader() if args.mode == 'test' else datamodule.val_dataloader()
 
@@ -95,6 +97,7 @@ def main(args):
         batch_scores = []
         batch_nll = []
         batch_ell = []
+        batch_node_label = []
 
         ground_truth = []
         input_products = []
@@ -102,7 +105,7 @@ def main(args):
             data = data.to(torch_device)
             
 
-            pred_molecule_list, true_molecule_list, products_list, scores, nlls, ells = decoder_model.sample_batch(
+            pred_molecule_list, true_molecule_list, products_list, scores, nlls, ells, node_correct = decoder_model.sample_batch(
                 data=data,
                 batch_id=ident,
                 batch_size=bs,
@@ -114,7 +117,7 @@ def main(args):
                 use_one_hot=args.use_one_hot,
 
                 torch_device=torch_device,
-                checkpoint_classifier = decoder_model,
+                checkpoint_classifier = classifier_model,
 
             )
 
@@ -122,6 +125,7 @@ def main(args):
             batch_scores.append(scores)
             batch_nll.append(nlls)
             batch_ell.append(ells)
+            batch_node_label.append(node_correct)
 
             if sample_idx == 0:
                 ground_truth.extend(true_molecule_list)
@@ -151,8 +155,8 @@ def main(args):
             grouped_ells.append(ells_group)
 
         # Writing smiles
-        for true_mol, product_mol, pred_mols, pred_scores, nlls, ells in zip(
-                ground_truth, input_products, grouped_samples, grouped_scores, grouped_nlls, grouped_ells,
+        for true_mol, product_mol, pred_mols, pred_scores, nlls, ells, node_corrects in zip(
+                ground_truth, input_products, grouped_samples, grouped_scores, grouped_nlls, grouped_ells, batch_node_label
         ):
             true_mol, true_n_dummy_atoms = build_molecule(
                 true_mol[0], true_mol[1], dataset_infos.atom_decoder, return_n_dummy_atoms=True
@@ -162,7 +166,7 @@ def main(args):
             product_mol = build_molecule(product_mol[0], product_mol[1], dataset_infos.atom_decoder)
             product_smi = Chem.MolToSmiles(product_mol) # type: ignore
 
-            for pred_mol, pred_score, nll, ell in zip(pred_mols, pred_scores, nlls, ells):
+            for pred_mol, pred_score, nll, ell, node_correct in zip(pred_mols, pred_scores, nlls, ells, node_corrects):
                 pred_mol, n_dummy_atoms = build_molecule(
                     pred_mol[0], pred_mol[1], dataset_infos.atom_decoder, return_n_dummy_atoms=True
                 )
@@ -175,7 +179,8 @@ def main(args):
                 sampled_atom_nums.append(RetroBridgeDatasetInfos.max_n_dummy_nodes - n_dummy_atoms)
                 computed_nlls.append(nll)
                 computed_ells.append(ell)
-
+                computed_nc.append(node_correct)
+  
         table = pd.DataFrame({
             'product': product_molecules_smiles,
             'pred': pred_molecules_smiles,
@@ -185,7 +190,8 @@ def main(args):
             'sampled_n_dummy_nodes': sampled_atom_nums,
             'nll': computed_nlls,
             'ell': computed_ells,
-        })
+            'nc_label':computed_nc,
+        }) 
         full_table = pd.concat([prev_table, table])
         full_table.to_csv(table_path, index=False)
 

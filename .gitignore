@@ -6,3 +6,5 @@ data/
 RetroClassifier/
 samples/
 models/
+ckpt_classifier/
+X_output.csv/

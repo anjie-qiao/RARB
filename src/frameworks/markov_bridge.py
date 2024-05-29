@@ -1,3 +1,9 @@
+
+
+
+
+
+
 from ctypes.wintypes import PINT
 from multiprocessing import context
 from xml.sax.handler import property_interning_dict
@@ -475,7 +481,7 @@ class MarkovBridge(pl.LightningModule):
         :return: molecule_list. Each element of this list is a tuple (atom_types, charges, positions)
         """
 
-        chain_X, chain_E, true_molecule_list, products_list, molecule_list, _, nll, ell = self.sample_chain(
+        chain_X, chain_E, true_molecule_list, products_list, molecule_list, _, nll, ell, node_correct = self.sample_chain(
             data=data,
             batch_size=batch_size,
             keep_chain=keep_chain,
@@ -498,7 +504,7 @@ class MarkovBridge(pl.LightningModule):
                 save_final=save_final
             )
 
-        return molecule_list, true_molecule_list, products_list, [0] * len(molecule_list), nll, ell
+        return molecule_list, true_molecule_list, products_list, [0] * len(molecule_list), nll, ell, node_correct
 
     def sample_chain(
             self, data, batch_size, keep_chain, number_chain_steps_to_save, save_true_reactants, use_one_hot=False,
@@ -514,8 +520,7 @@ class MarkovBridge(pl.LightningModule):
         context = context.mask(c_node_mask)
         
         px_label = context.X[:,:,-1].unsqueeze(-1)
-        pe_label = context.E[:,:,:,-1].unsqueeze(-1)
-
+        # pe_label = context.E[:,:,:,-1].unsqueeze(-1)
         # p_node_comparison = product.X  == context.X[:,:,:-1]
         # p_node_comparison_flat = p_node_comparison.view(p_node_comparison.size(0), -1)
         # p_node_correct = torch.all(p_node_comparison_flat, dim=1)
@@ -534,7 +539,7 @@ class MarkovBridge(pl.LightningModule):
         original_product = product.clone()
         original_product.E = utils.decode_no_edge(original_product.E)
         #(bs,n,n)
-        edge_mask = (original_product.E ==0 ).all(dim=-1)
+        edge_mask = (original_product.E == 0).all(dim=-1)
 
         product_data = {'X_t': product.X, 'E_t': product.E, 'y_t': product.y, 't': None, 'node_mask': node_mask}
         product_extra_data = self.compute_extra_data(product_data, context=None, condition_on_t=False)
@@ -554,6 +559,7 @@ class MarkovBridge(pl.LightningModule):
         edge_labels = torch.full(product.E.shape[:-1], fill_value=0, dtype=torch.long, device=self.device)  
         edge_labels[~edge_mask] = edge_predicted_labels
       
+        
         node_correct = torch.all(restored_node_labels.unsqueeze(-1) == px_label, dim=1)
         # edge_comparison = torch.argmax(pred_label['E'], dim=-1) == pe_label
         # edge_comparison_flat = edge_comparison.view(edge_comparison.size(0), -1)
@@ -661,6 +667,7 @@ class MarkovBridge(pl.LightningModule):
             chain_X, chain_E, true_molecule_list, products_list, molecule_list, pred,
             nll.detach().cpu().numpy().tolist(),
             ell.detach().cpu().numpy().tolist(),
+            node_correct,
         )
 
     def visualize(

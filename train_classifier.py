@@ -1,7 +1,7 @@
 import os
 import argparse
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '3'
+os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 
 from datetime import datetime
 

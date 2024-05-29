@@ -11,11 +11,10 @@ import os
 import time
 
 from src.data import utils
-from src.metrics.train_metrics import TrainLossDiscrete
+from src.metrics.train_metrics import TrainLossClassifier
 from src.metrics.sampling_metrics import compute_retrosynthesis_metrics
 from src.models.transformer_model import GraphTransformer
 from src.models.classifier import Classifier
-from src.data.utils import decode_no_edge
 
 from sklearn.metrics import roc_auc_score
 from tqdm import tqdm
@@ -41,6 +40,8 @@ class RertoClassifier(pl.LightningModule):
             enc_edge_loss,
             log_every_steps,
             sample_every_val,
+            use_positional_encoding,
+            pos_enc_dim,
     ):
 
         super().__init__()
@@ -68,8 +69,8 @@ class RertoClassifier(pl.LightningModule):
         self.ydim_output = output_dims['y']
 
         self.dataset_info = dataset_infos
-        self.train_loss = TrainLossDiscrete(lambda_train) 
-        self.val_loss = TrainLossDiscrete(lambda_train) 
+        self.train_loss = TrainLossClassifier(lambda_train) 
+        self.val_loss = TrainLossClassifier(lambda_train) 
         self.extra_features = extra_features
         self.domain_features = domain_features
 
@@ -224,7 +225,7 @@ class RertoClassifier(pl.LightningModule):
         #(bs, n, n)
         edge_mask = (original_product.E == 0).all(dim=-1)
         #(compactN,)
-        product_label['E_flat'] = product['E'][~edge_mask]
+        product_label['E_flat'] = product_label['E'][~edge_mask]
         
         #print("node_1: ", (product_label['X_flat'].view(-1) == 1).sum().item(),"node_0: ", (product_label['X_flat'].view(-1) == 0).sum().item(), "num:", product_label['X_flat'].numel())
         #print("edge_1: ", (product_label['E_flat'].view(-1) == 1).sum().item(),"edge_0: ", (product_label['E_flat'].view(-1) == 0).sum().item(),"num:",product_label['E_flat'].numel())
