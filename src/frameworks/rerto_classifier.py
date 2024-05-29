@@ -69,7 +69,7 @@ class RertoClassifier(pl.LightningModule):
         self.ydim_output = output_dims['y']
 
         self.dataset_info = dataset_infos
-        self.train_loss = TrainLossClassifier(lambda_train) 
+        self.train_loss = TrainLossClassifier(lambda_train)
         self.val_loss = TrainLossClassifier(lambda_train) 
         self.extra_features = extra_features
         self.domain_features = domain_features
@@ -113,7 +113,7 @@ class RertoClassifier(pl.LightningModule):
     def training_step(self, data, i):
         product, node_mask, pred_label, product_label, edge_mask, new_node_mask= self.process_and_forward(data)
         pred_label['X_flat'] = pred_label['X'][new_node_mask]
-        pred_label['E_flat'] = pred_label['E'][~edge_mask]
+        pred_label['E_flat'] = pred_label['E'][edge_mask]
         return self.compute_training_loss(product_label, pred_label, i, self.enc_node_loss, self.enc_edge_loss)
 
     def compute_training_loss(self, product_label, pred_label, i, enc_node_loss, enc_edge_loss):
@@ -211,17 +211,14 @@ class RertoClassifier(pl.LightningModule):
             'E':context.E[:,:,:,-1],
         }
         node_mask = p_node_mask
+        # (BS, N)
         dummy_node_mask = product.X[...,-1] != 1
-        new_node_mask = node_mask & dummy_node_mask 
+        new_node_mask = node_mask & dummy_node_mask
         #(compactN,)
         product_label['X_flat'] = product_label['X'][new_node_mask]
         
-        original_product = product.clone()
-        original_product.E = utils.decode_no_edge(original_product.E)
-        #(bs,n,n)
-        edge_mask = (original_product.E == 0).all(dim=-1)
-        #(compactN,)
-        product_label['E_flat'] = product_label['E'][~edge_mask]
+        edge_mask = (product.E[...,0] != 1)
+        product_label['E_flat'] = product_label['E'][edge_mask]
    
         #print("node_1: ", (product_label['X_flat'].view(-1) == 1).sum().item(),"node_0: ", (product_label['X_flat'].view(-1) == 0).sum().item(), "num:", product_label['X_flat'].numel())
         #print("edge_1: ", (product_label['E_flat'].view(-1) == 1).sum().item(),"edge_0: ", (product_label['E_flat'].view(-1) == 0).sum().item(),"num:",product_label['E_flat'].numel())
@@ -239,7 +236,7 @@ class RertoClassifier(pl.LightningModule):
         #(bs,n,k)
         classifier_X = torch.where(new_node_mask.unsqueeze(-1), enc_input.X, 0.0)
         #(bs,n,n,k)
-        classifier_E = torch.where(~edge_mask.unsqueeze(-1), enc_input.E, 0.0)
+        classifier_E = torch.where(edge_mask.unsqueeze(-1), enc_input.E, 0.0)
         pred_label = self.classifier(classifier_X, classifier_E)
         return  pred_label
     
