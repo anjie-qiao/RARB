@@ -8,7 +8,7 @@ from datetime import datetime
 
 
 from src.utils import disable_rdkit_logging, parse_yaml_config, set_deterministic
-from ConRetrobridge.src.data.classifier_dataset import RetroBridgeDataModule, RetroBridgeDatasetInfos
+from src.data.classifier_dataset import RetroBridgeDataModule, RetroBridgeDatasetInfos
 from src.features.extra_features import DummyExtraFeatures, ExtraFeatures
 from src.features.extra_features_molecular import ExtraMolecularFeatures
 from src.frameworks.rerto_classifier import RertoClassifier

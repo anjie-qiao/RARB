@@ -28,6 +28,7 @@ use_positional_encoding: False
 pos_enc_dim: 8
 
 # Model
+
 extra_features: all
 extra_molecular_features: False
 n_layers: 3

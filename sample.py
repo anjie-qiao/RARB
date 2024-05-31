@@ -20,7 +20,6 @@ from tqdm import tqdm
 import time
 
 from pdb import set_trace
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
 def main(args):
     torch_device = 'cuda' if args.device == 'gpu' else 'cpu'
@@ -28,7 +27,7 @@ def main(args):
     checkpoint_name = args.checkpoint_decoder.split('/')[-1].replace('.ckpt', '')
 
     output_dir = os.path.join(args.samples, f'{args.dataset}_{args.mode}')
-    table_name = f'{checkpoint_name}_T={args.n_steps}_n={args.n_samples}_seednew={args.sampling_seed}.csv'
+    table_name = f'{checkpoint_name}_T={args.n_steps}_n={args.n_samples}_seed30%flipnode+trueE={args.sampling_seed}.csv'
     table_path = os.path.join(output_dir, table_name)
 
     skip_first_n = 0
@@ -107,17 +106,15 @@ def main(args):
         context, c_node_mask = utils.to_dense(data.context_x, data.context_edge_index, data.context_edge_attr, data.batch)
         context = context.mask(c_node_mask)
         #(bs, n, 1)
-        px_label = context.X[:,:,-1].unsqueeze(-1)
+        px_label = context.X[:,:,-1].unsqueeze(-1).clone()
         #(bs, n, n, 1)
         pe_label = context.E[:,:,:,-1].unsqueeze(-1)
         #(ba,n)
         dummy_node_mask = product.X[...,-1] != 1
         new_node_mask = node_mask & dummy_node_mask 
 
-        original_product = product.clone()
-        original_product.E = utils.decode_no_edge(original_product.E)
         #(bs,n,n)
-        edge_mask = (original_product.E == 0).all(dim=-1)
+        edge_mask = (product.E[...,0] != 1) & (torch.sum(product.E, dim=-1) != 0)  
 
         product_data = {'X_t': product.X, 'E_t': product.E, 'y_t': product.y, 't': None, 'node_mask': node_mask}
         product_extra_data = decoder_model.compute_extra_data(product_data, context=None, condition_on_t=False)
@@ -127,26 +124,34 @@ def main(args):
         node_predicted_labels = torch.argmax(pred_label['X'], dim=-1)   
         #(bs,n,n)
         edge_predicted_labels = torch.argmax(pred_label['E'], dim=-1)
+        #(bs,n,)
+        node_predicted_labels[~new_node_mask] = 0
         #(bs,n,n,)
-        edge_labels = torch.where(~edge_mask,edge_predicted_labels,0)
-      
-        # mark the correct graph or not 
-        # (bs,)
-        node_correct = torch.all(node_predicted_labels.unsqueeze(-1) == px_label, dim=1)
-        # (bs,n)  randomly filp the ground truth node labels of graph with incorrect prediction 
-        not_all_correct = node_predicted_labels[node_correct]
-        nac_mask = torch.rand(not_all_correct.shape) < 0.3
-        not_all_correct[nac_mask] = 1- not_all_correct[nac_mask]
-        node_predicted_labels[node_correct] = not_all_correct
+        edge_predicted_labels[~edge_mask] = 0
+        
+        # mark the correct graph 
+        #(bs)
+        node_correct = torch.all(node_predicted_labels == context.X[...,-1], dim=1)
+
+        # randomly filp the ground truth node labels of graph with incorrect prediction 
+        # (nocorN,n,1)  
+        not_all_correct = px_label[~node_correct]
+        nac_mask = torch.rand(not_all_correct.shape) < 0.28 #randomly select 28% of nodes to filp
+        not_all_correct[nac_mask] = 1 - not_all_correct[nac_mask]
+        px_label[~node_correct] = not_all_correct
+
+        #debug
+        px_label_com = torch.all(px_label.squeeze(-1) == context.X[...,-1], dim=1)
+        print("new node accuracy: ",px_label_com.float().mean().item())
 
         #create context and add labels
         context = product.clone()
-        context.X = torch.cat([context.X, node_predicted_labels], dim = -1)
+        context.X = torch.cat([context.X, px_label], dim = -1)
         context.E = torch.cat([context.E, pe_label], dim = -1)  
         context = context.mask(node_mask)   
 
         for sample_idx in range(group_size):
-            pred_molecule_list, true_molecule_list, products_list, scores, nlls, ells, node_correct = decoder_model.sample_batch(
+            pred_molecule_list, true_molecule_list, products_list, scores, nlls, ells = decoder_model.sample_batch(
                 data=data,
                 batch_id=ident,
                 batch_size=bs,
@@ -159,6 +164,7 @@ def main(args):
 
                 product=product, 
                 context=context,
+                node_mask=node_mask,
 
             )
 
@@ -166,7 +172,7 @@ def main(args):
             batch_scores.append(scores)
             batch_nll.append(nlls)
             batch_ell.append(ells)
-            batch_node_label.append(node_correct)
+            batch_node_label.append(node_correct.int().cpu().numpy())
 
             if sample_idx == 0:
                 ground_truth.extend(true_molecule_list)
@@ -177,27 +183,31 @@ def main(args):
         grouped_scores = []
         grouped_nlls = []
         grouped_ells = []
+        grouped_node_label = []
         for mol_idx_in_batch in range(bs):
             mol_samples_group = []
             mol_scores_group = []
             nlls_group = []
             ells_group = []
+            node_label_group = []
 
-            for batch_group, scores_group, nll_gr, ell_gr in zip(batch_groups, batch_scores, batch_nll, batch_ell):
+            for batch_group, scores_group, nll_gr, ell_gr, nc_gr in zip(batch_groups, batch_scores, batch_nll, batch_ell, batch_node_label):
                 mol_samples_group.append(batch_group[mol_idx_in_batch])
                 mol_scores_group.append(scores_group[mol_idx_in_batch])
                 nlls_group.append(nll_gr[mol_idx_in_batch])
                 ells_group.append(ell_gr[mol_idx_in_batch])
+                node_label_group.append(nc_gr[mol_idx_in_batch])
 
             assert len(mol_samples_group) == group_size
             grouped_samples.append(mol_samples_group)
             grouped_scores.append(mol_scores_group)
             grouped_nlls.append(nlls_group)
             grouped_ells.append(ells_group)
+            grouped_node_label.append(node_label_group)
 
         # Writing smiles
         for true_mol, product_mol, pred_mols, pred_scores, nlls, ells, node_corrects in zip(
-                ground_truth, input_products, grouped_samples, grouped_scores, grouped_nlls, grouped_ells, batch_node_label
+                ground_truth, input_products, grouped_samples, grouped_scores, grouped_nlls, grouped_ells, grouped_node_label
         ):
             true_mol, true_n_dummy_atoms = build_molecule(
                 true_mol[0], true_mol[1], dataset_infos.atom_decoder, return_n_dummy_atoms=True
