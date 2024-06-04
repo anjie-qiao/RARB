@@ -10,6 +10,8 @@ import numpy as np
 import rdkit.Chem
 import wandb
 import matplotlib.pyplot as plt
+from rdkit.Chem.Draw import rdMolDraw2D
+import matplotlib.colors as mcolors
 
 
 def create_dummy_conformer(molecule):
@@ -36,7 +38,6 @@ class MolecularVisualization:
 
         # create empty editable mol object
         mol = Chem.RWMol()
-
         # add atoms to mol and keep track of index
         node_to_idx = {}
         for i in range(len(node_list)):
@@ -151,3 +152,96 @@ class MolecularVisualization:
         except Chem.rdchem.KekulizeException:
             print("Can't kekulize molecule")
         return mols
+
+
+class ClassifierVisualization:
+    def __init__(self, dataset_infos):
+        self.dataset_infos = dataset_infos
+
+    def mol_from_graphs(self, node_list, adjacency_matrix, node_labels):
+        """
+        Convert graphs to rdkit molecules
+        node_list: the nodes of a batch of nodes (bs x n)
+        adjacency_matrix: the adjacency_matrix of the molecule (bs x n x n)
+        """
+        # dictionary to map integer value to the char of atom
+        atom_decoder = self.dataset_infos.atom_decoder
+
+        # create empty editable mol object
+        mol = Chem.RWMol()
+        # add atoms to mol and keep track of index
+        node_to_idx = {}
+        for i in range(len(node_list)):
+            if node_list[i] == -1:
+                continue
+            a = Chem.Atom(atom_decoder[int(node_list[i])])
+            # Add node predicted results as an atom property
+            a.SetProp('label', str(node_labels[i]))
+            molIdx = mol.AddAtom(a)
+            node_to_idx[i] = molIdx
+        for ix, row in enumerate(adjacency_matrix):
+            for iy, bond in enumerate(row):
+                # only traverse half the symmetric matrix
+                if iy <= ix:
+                    continue
+                if bond == 1:
+                    bond_type = Chem.rdchem.BondType.SINGLE
+                elif bond == 2:
+                    bond_type = Chem.rdchem.BondType.DOUBLE
+                elif bond == 3:
+                    bond_type = Chem.rdchem.BondType.TRIPLE
+                elif bond == 4:
+                    bond_type = Chem.rdchem.BondType.AROMATIC
+                else:
+                    continue
+                mol.AddBond(node_to_idx[ix], node_to_idx[iy], bond_type)
+
+        try:
+            mol = mol.GetMol()
+        except rdkit.Chem.KekulizeException:
+            print("Can't kekulize molecule")
+            mol = None
+        return mol
+
+    def visualize_with_labels(self, path: str, molecule_list, num_molecules_to_visualize: int, log='graph', prefix='', bs_num=None):
+        # define path to save figures
+        if not os.path.exists(path):
+            os.makedirs(path)
+        
+        for i in range(num_molecules_to_visualize):
+            file_path = os.path.join(path, '{}molecule_{}.svg'.format(prefix, bs_num))
+            mol = self.mol_from_graphs(molecule_list[i][0].cpu().numpy(), molecule_list[i][1].cpu().numpy(), molecule_list[i][2].cpu().numpy())
+            try:
+                self.draw_molecule_with_labels(mol, file_path)
+                if wandb.run and log is not None:
+                    print(f"Saving {file_path} to wandb")
+                    wandb.log({log: wandb.Image(file_path)}, commit=True)
+            except rdkit.Chem.KekulizeException:
+                print("Can't kekulize molecule")
+            except ValueError:
+                print("Maximum BFS search size exceeded")
+
+    def draw_molecule_with_labels(self, mol, file_path):
+        # set drawer
+        drawer = rdMolDraw2D.MolDraw2DSVG(500, 500)
+        opts = drawer.drawOptions()
+
+        # Generate a color dict based on atom labels
+        color_dict = {atom.GetIdx(): self.get_color_by_label(atom.GetProp('label')) for atom in mol.GetAtoms()}
+
+        # draw molecule
+        drawer.DrawMolecule(mol, highlightAtoms=list(range(mol.GetNumAtoms())), highlightAtomColors=color_dict)
+        drawer.FinishDrawing()
+
+        # save svg
+        svg = drawer.GetDrawingText().replace('svg:', '')
+        with open(file_path, 'w') as f:
+            f.write(svg)
+
+    def get_color_by_label(self, label):
+        color_map = {
+            '0': mcolors.to_rgba('blue'),   #pred correct
+            '1': mcolors.to_rgba('yellow'),     #pred=0, true=1 
+            '2': mcolors.to_rgba('green'),   #pred=1, true=0 
+        }
+        return color_map.get(label, mcolors.to_rgba('gray'))  

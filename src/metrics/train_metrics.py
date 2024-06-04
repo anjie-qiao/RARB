@@ -20,11 +20,12 @@ class EdgeMSE(MeanSquaredError):
 
 class TrainLossClassifier(nn.Module):
     """ Train with Cross entropy"""
-    def __init__(self, lambda_train):
+    def __init__(self, lambda_train, class_weights):
         super().__init__()
-        self.node_loss = nn.CrossEntropyLoss()
-        self.edge_loss = nn.CrossEntropyLoss()
+        self.node_loss = nn.CrossEntropyLoss(weight=class_weights)
+        self.edge_loss = nn.CrossEntropyLoss(weight=class_weights)
         self.lambda_train = lambda_train
+        self.class_weights = class_weights
 
     def forward(self, product_label, pred_label,enc_node_loss,enc_edge_loss):
         loss_X = self.node_loss(pred_label['X_flat'].view(-1,2), product_label['X_flat'].view(-1).long())

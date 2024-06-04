@@ -15,6 +15,7 @@ from src.metrics.train_metrics import TrainLossClassifier
 from src.metrics.sampling_metrics import compute_retrosynthesis_metrics
 from src.models.transformer_model import GraphTransformer
 from src.models.classifier import Classifier
+import torch.nn.functional as F
 
 from sklearn.metrics import roc_auc_score
 from tqdm import tqdm
@@ -42,6 +43,8 @@ class RertoClassifier(pl.LightningModule):
             sample_every_val,
             use_positional_encoding,
             pos_enc_dim,
+            threshold,
+            class_weights,
     ):
 
         super().__init__()
@@ -60,6 +63,7 @@ class RertoClassifier(pl.LightningModule):
 
         self.enc_node_loss = enc_node_loss
         self.enc_edge_loss = enc_edge_loss
+        self.threshold = threshold
 
         self.Xdim = input_dims['X']
         self.Edim = input_dims['E']
@@ -69,8 +73,8 @@ class RertoClassifier(pl.LightningModule):
         self.ydim_output = output_dims['y']
 
         self.dataset_info = dataset_infos
-        self.train_loss = TrainLossClassifier(lambda_train)
-        self.val_loss = TrainLossClassifier(lambda_train) 
+        self.train_loss = TrainLossClassifier(lambda_train,torch.tensor(class_weights))
+        self.val_loss = TrainLossClassifier(lambda_train,torch.tensor(class_weights)) 
         self.extra_features = extra_features
         self.domain_features = domain_features
 
@@ -160,9 +164,13 @@ class RertoClassifier(pl.LightningModule):
         
             product, node_mask, pred_label, product_label, edge_mask, new_node_mask = self.process_and_forward(data)
 
-            #(bs, n, )
-            node_predicted_labels = torch.argmax(pred_label['X'], dim=-1)
-            #(bs, n, n, )
+            # #(bs, n, )
+            # node_predicted_labels = torch.argmax(pred_label['X'], dim=-1)
+            probabilities = F.softmax(pred_label['X'], dim=-1)
+            positive_class_prob = probabilities[:, :, 1]
+            node_predicted_labels = (positive_class_prob >= self.threshold).long()
+
+            # #(bs, n, n, )
             edge_predicted_labels = torch.argmax(pred_label['E'], dim=-1)
             
             node_predicted_labels[~new_node_mask] = 0
