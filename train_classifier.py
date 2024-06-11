@@ -1,14 +1,15 @@
 import os
 import argparse
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+#os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+
 
 from datetime import datetime
 
 
 
 from src.utils import disable_rdkit_logging, parse_yaml_config, set_deterministic
-from ConRetrobridge.src.data.classifier_dataset import RetroBridgeDataModule, RetroBridgeDatasetInfos
+from src.data.classifier_dataset import RetroBridgeDataModule, RetroBridgeDatasetInfos
 from src.features.extra_features import DummyExtraFeatures, ExtraFeatures
 from src.features.extra_features_molecular import ExtraMolecularFeatures
 from src.frameworks.rerto_classifier import RertoClassifier
@@ -95,6 +96,9 @@ def main(args):
         sample_every_val=args.sample_every_val,
         use_positional_encoding=args.use_positional_encoding,
         pos_enc_dim=args.pos_enc_dim,
+        threshold = args.threshold,
+        class_weights = args.class_weights,
+
     )
 
     checkpoints_dir = os.path.join(checkpoints_dir, 'accuracy')

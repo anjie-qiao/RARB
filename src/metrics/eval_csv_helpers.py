@@ -29,7 +29,7 @@ def compute_confidence(df):
     #     # Don't use .merge() as it can change the order of rows
     # #     df = df.merge(counts, on=['group', 'pred'], how='left')
     #     df = df.merge(counts, on=['group', 'pred'], how='inner')
-    #     df = df.merge(group_size, on=['group'], how='left')
+    #     df = df.merge(group_size, on=['group'], how='left') 
 
     counts_dict = {(g, p): c for g, p, c in zip(counts['group'], counts['pred'], counts['count'])}
     df['count'] = df.apply(lambda x: counts_dict[(x['group'], x['pred'])], axis=1)

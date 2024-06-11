@@ -15,6 +15,8 @@ from src.metrics.train_metrics import TrainLossClassifier
 from src.metrics.sampling_metrics import compute_retrosynthesis_metrics
 from src.models.transformer_model import GraphTransformer
 from src.models.classifier import Classifier
+import torch.nn.functional as F
+
 
 from sklearn.metrics import roc_auc_score
 from tqdm import tqdm
@@ -42,6 +44,9 @@ class RertoClassifier(pl.LightningModule):
             sample_every_val,
             use_positional_encoding,
             pos_enc_dim,
+            threshold,
+            class_weights,
+
     ):
 
         super().__init__()
@@ -60,6 +65,8 @@ class RertoClassifier(pl.LightningModule):
 
         self.enc_node_loss = enc_node_loss
         self.enc_edge_loss = enc_edge_loss
+        self.threshold = threshold
+
 
         self.Xdim = input_dims['X']
         self.Edim = input_dims['E']
@@ -69,8 +76,9 @@ class RertoClassifier(pl.LightningModule):
         self.ydim_output = output_dims['y']
 
         self.dataset_info = dataset_infos
-        self.train_loss = TrainLossClassifier(lambda_train)
-        self.val_loss = TrainLossClassifier(lambda_train) 
+        self.train_loss = TrainLossClassifier(lambda_train,torch.tensor(class_weights))
+        self.val_loss = TrainLossClassifier(lambda_train,torch.tensor(class_weights)) 
+
         self.extra_features = extra_features
         self.domain_features = domain_features
 
@@ -131,7 +139,9 @@ class RertoClassifier(pl.LightningModule):
     def validation_step(self, data, i):
         product, node_mask, pred_label, product_label, edge_mask, new_node_mask = self.process_and_forward(data)
         pred_label['X_flat'] = pred_label['X'][new_node_mask]
-        pred_label['E_flat'] = pred_label['E'][~edge_mask]
+        pred_label['E_flat'] = pred_label['E'][edge_mask]
+
+
         return self.compute_validation_loss(product_label, pred_label, i, self.enc_node_loss, self.enc_edge_loss)
 
     def on_validation_epoch_end(self):
@@ -160,13 +170,18 @@ class RertoClassifier(pl.LightningModule):
         
             product, node_mask, pred_label, product_label, edge_mask, new_node_mask = self.process_and_forward(data)
 
-            #(bs, n, )
-            node_predicted_labels = torch.argmax(pred_label['X'], dim=-1)
-            #(bs, n, n, )
+            # #(bs, n, )
+            # node_predicted_labels = torch.argmax(pred_label['X'], dim=-1)
+            probabilities = F.softmax(pred_label['X'], dim=-1)
+            positive_class_prob = probabilities[:, :, 1]
+            node_predicted_labels = (positive_class_prob >= self.threshold).long()
+
+            # #(bs, n, n, )
             edge_predicted_labels = torch.argmax(pred_label['E'], dim=-1)
             
             node_predicted_labels[~new_node_mask] = 0
-            edge_predicted_labels = edge_predicted_labels[edge_mask] = 0
+            edge_predicted_labels[~edge_mask] = 0
+
 
             #(compactN,)
             node_comparison_nozero =  node_predicted_labels[new_node_mask] == product_label['X_flat']
@@ -176,7 +191,8 @@ class RertoClassifier(pl.LightningModule):
             edge_comparison_flat = edge_comparison.view(edge_comparison.size(0), -1)
             edge_correct = torch.all(edge_comparison_flat, dim=1)
 
-            edge_com_nozero = edge_predicted_labels[~edge_mask] == product_label['E_flat']
+            edge_com_nozero = edge_predicted_labels[edge_mask] == product_label['E_flat']
+
 
             graph_correct = node_correct & edge_correct
             node_correct_all = torch.cat([node_correct_all,node_correct], dim = -1)
@@ -216,8 +232,9 @@ class RertoClassifier(pl.LightningModule):
         new_node_mask = node_mask & dummy_node_mask
         #(compactN,)
         product_label['X_flat'] = product_label['X'][new_node_mask]
-        
-        edge_mask = (product.E[...,0] != 1)
+        #Invalid edge and diag==0
+        edge_mask = (product.E[...,0] != 1) & (torch.sum(product.E, dim=-1) != 0)  
+
         product_label['E_flat'] = product_label['E'][edge_mask]
    
         #print("node_1: ", (product_label['X_flat'].view(-1) == 1).sum().item(),"node_0: ", (product_label['X_flat'].view(-1) == 0).sum().item(), "num:", product_label['X_flat'].numel())

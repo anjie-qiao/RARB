@@ -1,9 +1,3 @@
-
-
-
-
-
-
 from ctypes.wintypes import PINT
 from curses import noecho
 from multiprocessing import context
@@ -21,8 +15,6 @@ from src.frameworks import diffusion_utils
 from src.metrics.train_metrics import TrainLossDiscrete, TrainLossVLB
 from src.metrics.sampling_metrics import compute_retrosynthesis_metrics
 from src.models.transformer_model import GraphTransformer
-
-from RetroClassifier.src.frameworks.rerto_classifier import RertoClassifier
 
 
 from sklearn.metrics import roc_auc_score
@@ -468,6 +460,8 @@ class MarkovBridge(pl.LightningModule):
             use_one_hot=False,
             product=None, 
             context=None,
+            node_mask=None,
+
     ):
         """
         :param data
@@ -491,6 +485,7 @@ class MarkovBridge(pl.LightningModule):
             use_one_hot=use_one_hot,
             product=product, 
             context=context,
+            node_mask=node_mask,
         )
 
         if self.visualization_tools is not None:
@@ -505,11 +500,11 @@ class MarkovBridge(pl.LightningModule):
                 save_final=save_final
             )
 
-        return molecule_list, true_molecule_list, products_list, [0] * len(molecule_list), nll, ell, node_correct
-
+        return molecule_list, true_molecule_list, products_list, [0] * len(molecule_list), nll, ell
     def sample_chain(
             self, data, batch_size, keep_chain, number_chain_steps_to_save, save_true_reactants, use_one_hot=False,
-            product=None, context=None,
+            product=None, context=None,node_mask=None,
+
     ):
         
         # Context product

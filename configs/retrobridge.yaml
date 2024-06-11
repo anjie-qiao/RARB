@@ -20,7 +20,7 @@ enable_progress_bar: True
 # Data
 dataset: uspto50k
 batch_size: 64
-num_workers: 1
+num_workers: 64
 shuffle: True
 extra_nodes: True
 swap: False

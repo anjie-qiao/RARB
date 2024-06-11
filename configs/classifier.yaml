@@ -1,6 +1,6 @@
 # General
 experiment_name: classifier
-checkpoints: ckpt_classifier
+checkpoints: ckpt_classifier/threshold0.7/
 logs: logs
 data: data
 wandb_entity: qiao906187146
@@ -44,9 +44,11 @@ weight_decay: 0.000000000001
 # loss coefficient
 dec_loss: 0.4
 cla_loss: 0.6
+threshold: 0.9
 
 enc_node_loss: 0.5
 enc_edge_loss: 0.5
+class_weights: [0.7,0.3]
 
 
 # Checkpoint
