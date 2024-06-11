@@ -27,6 +27,7 @@ def main(args):
     checkpoint_name = args.checkpoint_decoder.split('/')[-1].replace('.ckpt', '')
 
     output_dir = os.path.join(args.samples, f'{args.dataset}_{args.mode}')
+
     table_name = f'{checkpoint_name}_T={args.n_steps}_n={args.n_samples}_seed30%flipnode+trueE={args.sampling_seed}.csv'
     table_path = os.path.join(output_dir, table_name)
 
@@ -113,6 +114,7 @@ def main(args):
         dummy_node_mask = product.X[...,-1] != 1
         new_node_mask = node_mask & dummy_node_mask 
 
+
         #(bs,n,n)
         edge_mask = (product.E[...,0] != 1) & (torch.sum(product.E, dim=-1) != 0)  
 
@@ -151,6 +153,7 @@ def main(args):
         context = context.mask(node_mask)   
 
         for sample_idx in range(group_size):
+
             pred_molecule_list, true_molecule_list, products_list, scores, nlls, ells = decoder_model.sample_batch(
                 data=data,
                 batch_id=ident,
@@ -166,12 +169,14 @@ def main(args):
                 context=context,
                 node_mask=node_mask,
 
+
             )
 
             batch_groups.append(pred_molecule_list)
             batch_scores.append(scores)
             batch_nll.append(nlls)
             batch_ell.append(ells)
+
             batch_node_label.append(node_correct.int().cpu().numpy())
 
             if sample_idx == 0:
@@ -207,7 +212,9 @@ def main(args):
 
         # Writing smiles
         for true_mol, product_mol, pred_mols, pred_scores, nlls, ells, node_corrects in zip(
+
                 ground_truth, input_products, grouped_samples, grouped_scores, grouped_nlls, grouped_ells, grouped_node_label
+
         ):
             true_mol, true_n_dummy_atoms = build_molecule(
                 true_mol[0], true_mol[1], dataset_infos.atom_decoder, return_n_dummy_atoms=True
