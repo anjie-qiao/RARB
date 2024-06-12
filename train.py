@@ -113,6 +113,7 @@ def main(args):
             number_chain_steps_to_save=args.number_chain_steps_to_save,
             fix_product_nodes=args.fix_product_nodes,
             loss_type=args.loss_type,
+            retrieval_k=args.retrieval_k,
         )
     elif args.model == 'DiGress':
         model = DiscreteDiffusion(

@@ -38,6 +38,7 @@ extra_molecular_features: False
 n_layers: 5
 hidden_mlp_dims: {'X': 256, 'E': 128, 'y': 128}
 hidden_dims: {'dx': 256, 'de': 64, 'dy': 64, 'n_head': 8, 'dim_ffX': 256, 'dim_ffE': 128, 'dim_ffy': 128}
+retrieval_k: 3
 
 # Training
 n_epochs: 1000

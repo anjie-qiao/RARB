@@ -56,9 +56,12 @@ class MarkovBridge(pl.LightningModule):
             number_chain_steps_to_save,
             fix_product_nodes=False,
             loss_type='cross_entropy',
+            retrieval_k=0,
     ):
 
         super().__init__()
+
+        self.retrieval_k = retrieval_k
 
         assert loss_type in ['cross_entropy', 'vlb']
 
