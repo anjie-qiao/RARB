@@ -27,6 +27,7 @@ class TrainLossClassifier(nn.Module):
         self.lambda_train = lambda_train
         self.class_weights = class_weights
 
+
     def forward(self, product_label, pred_label,enc_node_loss,enc_edge_loss):
         loss_X = self.node_loss(pred_label['X_flat'].view(-1,2), product_label['X_flat'].view(-1).long())
         loss_E = self.edge_loss(pred_label['E_flat'].view(-1,2), product_label['E_flat'].view(-1).long())

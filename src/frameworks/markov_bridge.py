@@ -17,7 +17,6 @@ from src.metrics.sampling_metrics import compute_retrosynthesis_metrics
 from src.models.transformer_model import GraphTransformer
 
 
-
 from sklearn.metrics import roc_auc_score
 from tqdm import tqdm
 
@@ -465,6 +464,7 @@ class MarkovBridge(pl.LightningModule):
             product=None, 
             context=None,
             node_mask=None,
+
     ):
         """
         :param data
@@ -479,7 +479,7 @@ class MarkovBridge(pl.LightningModule):
         :return: molecule_list. Each element of this list is a tuple (atom_types, charges, positions)
         """
 
-        chain_X, chain_E, true_molecule_list, products_list, molecule_list, _, nll, ell = self.sample_chain(
+        chain_X, chain_E, true_molecule_list, products_list, molecule_list, _, nll, ell, node_correct = self.sample_chain(
             data=data,
             batch_size=batch_size,
             keep_chain=keep_chain,
@@ -504,10 +504,10 @@ class MarkovBridge(pl.LightningModule):
             )
 
         return molecule_list, true_molecule_list, products_list, [0] * len(molecule_list), nll, ell
-
     def sample_chain(
             self, data, batch_size, keep_chain, number_chain_steps_to_save, save_true_reactants, use_one_hot=False,
             product=None, context=None,node_mask=None,
+
     ):
         
         # Context product
@@ -665,6 +665,7 @@ class MarkovBridge(pl.LightningModule):
             chain_X, chain_E, true_molecule_list, products_list, molecule_list, pred,
             nll.detach().cpu().numpy().tolist(),
             ell.detach().cpu().numpy().tolist(),
+            node_correct,
         )
 
     def visualize(

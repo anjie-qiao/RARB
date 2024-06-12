@@ -7,7 +7,9 @@ from src.metrics.eval_csv_helpers import canonicalize, compute_confidence, assig
 
 csv_file = Path('./samples/uspto50k_test/epoch=479_top_5_accuracy=0.930_T=500_n=10_seednodelabel+predE=1.csv')
 df = pd.read_csv(csv_file)
-df = df[df['nc_label']==0]
+
+df = df[df['nc_label']==1]
+
 df['from_file'] = 'epoch=479_top_5_accuracy=0.930_T=500_n=10_seed22=1'
 df = assign_groups(df, samples_per_product_per_file=10)
 df.loc[(df['product'] == 'C') & (df['true'] == 'C'), 'true'] = 'Placeholder'

@@ -6,6 +6,7 @@ from src.utils import disable_rdkit_logging, parse_yaml_config, set_deterministi
 from src.analysis.rdkit_functions import build_molecule
 from src.data.retrobridge_dataset import RetroBridgeDataModule, RetroBridgeDatasetInfos
 import torch.nn.functional as F
+
 from rdkit import Chem
 from tqdm import tqdm
 from src.data import utils
@@ -37,6 +38,7 @@ def main(args):
     )
     dataset_infos = RetroBridgeDatasetInfos(datamodule)
     visualization_tools = ClassifierVisualization(dataset_infos)
+
 
 
     set_deterministic(args.sampling_seed)
@@ -196,4 +198,5 @@ if __name__ == '__main__':
     parser.add_argument('--mode', action='store', type=str, required=True)
     parser.add_argument('--sampling_seed', action='store', type=int, required=False, default=None)
     parser.add_argument('--threshold', action='store', required=False, default=False)
+
     main(args=parse_yaml_config(parser.parse_args()))
