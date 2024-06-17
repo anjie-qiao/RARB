@@ -15,6 +15,7 @@ from src.frameworks import diffusion_utils
 from src.metrics.train_metrics import TrainLossDiscrete, TrainLossVLB
 from src.metrics.sampling_metrics import compute_retrosynthesis_metrics
 from src.models.transformer_model import GraphTransformer
+from torch_geometric.utils import to_dense_adj, to_dense_batch, scatter
 
 
 from sklearn.metrics import roc_auc_score
@@ -56,11 +57,13 @@ class MarkovBridge(pl.LightningModule):
             fix_product_nodes=False,
             loss_type='cross_entropy',
             retrieval_k=0,
+            encoded_reactants=None,
     ):
 
         super().__init__()
 
         self.retrieval_k = retrieval_k
+        self.encoded_reactants = encoded_reactants
 
         assert loss_type in ['cross_entropy', 'vlb']
 
@@ -156,9 +159,13 @@ class MarkovBridge(pl.LightningModule):
         product, p_node_mask = utils.to_dense(data.p_x, data.p_edge_index, data.p_edge_attr, data.batch)
         product = product.mask(p_node_mask)
 
-        context, c_node_mask = utils.to_dense(data.context_x, data.context_edge_index, data.context_edge_attr,
-                                              data.batch)
-        context = context.mask(c_node_mask)
+        #(bs,k)
+        retrieval_list = data.retrieval_list
+        retrieval_index = retrieval_list[..., :self.retrieval_k]
+        #(bs,k,512)
+        retrieval_emb = self.encoded_reactants[retrieval_index]  
+        #(bs,k*512)
+        retrieval_emb = retrieval_emb.flatten(start_dim=1)
 
         assert torch.allclose(r_node_mask, p_node_mask)
         node_mask = r_node_mask
@@ -172,8 +179,12 @@ class MarkovBridge(pl.LightningModule):
         )
 
         # Computing extra features + context and making predictions
-        # context = product.clone() if self.use_context else None
+        context = product.clone() if self.use_context else None
         extra_data = self.compute_extra_data(noisy_data, context=context)
+        print(extra_data.y.shape)
+        extra_data.y = torch.cat([extra_data.y,retrieval_emb], dim=1)
+        print(extra_data.y.shape)
+        time.sleep(100)
         pred = self.forward(noisy_data, extra_data, node_mask)
 
         # Masking unchanged part
@@ -464,7 +475,6 @@ class MarkovBridge(pl.LightningModule):
             product=None, 
             context=None,
             node_mask=None,
-
     ):
         """
         :param data

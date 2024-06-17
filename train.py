@@ -4,7 +4,7 @@ import argparse
 from datetime import datetime
 
 from src.utils import disable_rdkit_logging, parse_yaml_config, set_deterministic
-from src.data.retrobridge_dataset import RetroBridgeDataModule, RetroBridgeDatasetInfos
+from src.data.retrieval_dataset import RetroBridgeDataModule, RetroBridgeDatasetInfos
 from src.features.extra_features import DummyExtraFeatures, ExtraFeatures
 from src.features.extra_features_molecular import ExtraMolecularFeatures
 from src.metrics.molecular_metrics_discrete import TrainMolecularMetricsDiscrete
@@ -13,6 +13,7 @@ from src.analysis.visualization import MolecularVisualization
 from src.frameworks.markov_bridge import MarkovBridge
 from src.frameworks.discrete_diffusion import DiscreteDiffusion
 from src.frameworks.one_shot_model import OneShotModel
+import torch
 
 from pytorch_lightning import Trainer, callbacks, loggers
 
@@ -77,10 +78,15 @@ def main(args):
         extra_features=extra_features,
         domain_features=domain_features,
         use_context=args.use_context,
+        retrieval_k=args.retrieval_k,
+
     )
     train_metrics = TrainMolecularMetricsDiscrete(dataset_infos)
     sampling_metrics = SamplingMolecularMetrics(dataset_infos, datamodule.train_smiles)
     visualization_tools = MolecularVisualization(dataset_infos)
+    
+    #(40008,512)
+    encoded_reactants = torch.load("data/uspto50k/raw/tencoded_react_tensor.pt")
 
     if args.model == 'RetroBridge':
         model = MarkovBridge(
@@ -114,6 +120,7 @@ def main(args):
             fix_product_nodes=args.fix_product_nodes,
             loss_type=args.loss_type,
             retrieval_k=args.retrieval_k,
+            encoded_reactants=encoded_reactants,
         )
     elif args.model == 'DiGress':
         model = DiscreteDiffusion(

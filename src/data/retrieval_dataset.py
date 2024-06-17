@@ -83,11 +83,11 @@ class RetroBridgeDataset(InMemoryDataset):
 
     @property
     def raw_file_names(self):
-        return ['uspto50k_train.csv', 'uspto50k_val.csv', 'uspto50k_test.csv']
+        return ['uspto50k_train_unirxnfp.csv', 'uspto50k_val_unirxnfp.csv', 'uspto50k_test_unirxnfp.csv']
 
     @property
     def split_file_name(self):
-        return ['uspto50k_train.csv', 'uspto50k_val.csv', 'uspto50k_test.csv']
+        return ['uspto50k_train_unirxnfp.csv', 'uspto50k_val_unirxnfp.csv', 'uspto50k_test_unirxnfp.csv']
 
     @property
     def split_paths(self):
@@ -96,7 +96,7 @@ class RetroBridgeDataset(InMemoryDataset):
 
     @property
     def processed_file_names(self):
-        return [f'train.pt', f'val.pt', f'test.pt']
+        return [f'train_unirxn.pt', f'val_unirxn.pt', f'test_unirxn.pt']
 
     def download(self):
         os.makedirs(self.raw_dir, exist_ok=True)
@@ -109,7 +109,11 @@ class RetroBridgeDataset(InMemoryDataset):
     def process(self):
         table = pd.read_csv(self.split_paths[self.file_idx])
         data_list = []
-        for i, reaction_smiles in enumerate(tqdm(table['reactants>reagents>production'].values)):
+        for i, row in tqdm(table.iterrows(), total=table.shape[0]):
+            retrieval_list = torch.tensor([int(x) for x in row['retrieval'].split(',')], dtype=torch.long).unsqueeze(0)
+            print(retrieval_list.shape)
+
+            reaction_smiles = row['reactants>reagents>production']
             reactants_smi, _, product_smi = reaction_smiles.split('>')
             rmol = Chem.MolFromSmiles(reactants_smi)
             pmol = Chem.MolFromSmiles(product_smi)
@@ -177,8 +181,8 @@ class RetroBridgeDataset(InMemoryDataset):
                 x=r_x, edge_index=r_edge_index, edge_attr=r_edge_attr, y=y, idx=i,
                 p_x=p_x, p_edge_index=p_edge_index, p_edge_attr=p_edge_attr,
                 r_smiles=reactants_smi, p_smiles=product_smi,
+                retrieval_list=retrieval_list,
             )
-
             data_list.append(data)
 
         print(f'Dataset contains {len(data_list)} reactions')
@@ -310,7 +314,6 @@ class RetroBridgeDataModule(MolecularDataModule):
 class RetroBridgeMITDataModule(RetroBridgeDataModule):
     DATASET_CLASS = RetroBridgeMITDataset
 
-
 class RetroBridgeDatasetInfos:
     atom_encoder = {
         'N': 0, 'C': 1, 'O': 2, 'S': 3, 'Cl': 4, 'F': 5, 'B': 6, 'Br': 7, 'P': 8,
@@ -386,7 +389,7 @@ class RetroBridgeDatasetInfos:
             self.valency_distribution = valencies
             self.nodes_dist = utils.DistributionNodes(self.n_nodes)
 
-    def compute_input_output_dims(self, datamodule, extra_features, domain_features, use_context, use_positional_encoding):
+    def compute_input_output_dims(self, datamodule, extra_features, domain_features, use_context, retrieval_k=0):
         example_batch = next(iter(datamodule.train_dataloader()))
         r_ex_dense, r_node_mask = utils.to_dense(
             example_batch.x,
@@ -412,7 +415,7 @@ class RetroBridgeDatasetInfos:
         self.input_dims = {
             'X': example_batch['x'].size(1),
             'E': example_batch['edge_attr'].size(1),
-            'y': example_batch['y'].size(1)  
+            'y': example_batch['y'].size(1) + 1  # + 1 due to time conditioning
         }
 
         ex_extra_feat = extra_features(p_example_data)
@@ -425,9 +428,11 @@ class RetroBridgeDatasetInfos:
         self.input_dims['E'] += ex_extra_molecular_feat.E.size(-1)
         self.input_dims['y'] += ex_extra_molecular_feat.y.size(-1)
 
+        self.input_dims['y'] += 512 * retrieval_k
+
         if use_context:
-            self.input_dims['X'] += (example_batch['x'].size(1) + 1)
-            self.input_dims['E'] += (example_batch['p_edge_attr'].size(1) + 1)
+            self.input_dims['X'] += (example_batch['x'].size(1))
+            self.input_dims['E'] += (example_batch['p_edge_attr'].size(1))
 
         self.output_dims = {
             'X': example_batch['x'].size(1),
