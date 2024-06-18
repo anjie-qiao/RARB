@@ -24,3 +24,5 @@ __pycache__/
 
 # Ignore checkpoint files
 *.ckpt
+
+*.pt

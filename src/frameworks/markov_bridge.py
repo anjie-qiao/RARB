@@ -64,6 +64,7 @@ class MarkovBridge(pl.LightningModule):
 
         self.retrieval_k = retrieval_k
         self.encoded_reactants = encoded_reactants
+        self.val_encoded_reactants = torch.load("data/uspto50k/raw/tencoded_react_tensor_val.pt")
 
         assert loss_type in ['cross_entropy', 'vlb']
 
@@ -181,10 +182,7 @@ class MarkovBridge(pl.LightningModule):
         # Computing extra features + context and making predictions
         context = product.clone() if self.use_context else None
         extra_data = self.compute_extra_data(noisy_data, context=context)
-        print(extra_data.y.shape)
         extra_data.y = torch.cat([extra_data.y,retrieval_emb], dim=1)
-        print(extra_data.y.shape)
-        time.sleep(100)
         pred = self.forward(noisy_data, extra_data, node_mask)
 
         # Masking unchanged part
@@ -472,9 +470,6 @@ class MarkovBridge(pl.LightningModule):
             sample_idx,
             save_true_reactants=True,
             use_one_hot=False,
-            product=None, 
-            context=None,
-            node_mask=None,
     ):
         """
         :param data
@@ -496,9 +491,6 @@ class MarkovBridge(pl.LightningModule):
             number_chain_steps_to_save=number_chain_steps_to_save,
             save_true_reactants=save_true_reactants,
             use_one_hot=use_one_hot,
-            product=product, 
-            context=context,
-            node_mask=node_mask,
         )
 
         if self.visualization_tools is not None:
@@ -516,13 +508,18 @@ class MarkovBridge(pl.LightningModule):
         return molecule_list, true_molecule_list, products_list, [0] * len(molecule_list), nll, ell
     def sample_chain(
             self, data, batch_size, keep_chain, number_chain_steps_to_save, save_true_reactants, use_one_hot=False,
-            product=None, context=None,node_mask=None,
-
     ):
         
-        # Context product
-        # product, node_mask = utils.to_dense(data.p_x, data.p_edge_index, data.p_edge_attr, data.batch)
-        # product = product.mask(node_mask)
+        #Context product
+        product, node_mask = utils.to_dense(data.p_x, data.p_edge_index, data.p_edge_attr, data.batch)
+        product = product.mask(node_mask)
+
+        retrieval_list = data.retrieval_list
+        retrieval_index = retrieval_list[..., :self.retrieval_k]
+        #(bs,k,512)
+        retrieval_emb = self.val_encoded_reactants[retrieval_index]  
+        #(bs,k*512)
+        retrieval_emb = retrieval_emb.flatten(start_dim=1)
 
         # context, c_node_mask = utils.to_dense(data.context_x, data.context_edge_index, data.context_edge_attr,
         #                                       data.batch)
@@ -581,7 +578,7 @@ class MarkovBridge(pl.LightningModule):
         # context.E = torch.cat([context.E, edge_labels], dim = -1)  
         # context = context.mask(node_mask)      
         
-        # context = product.clone() if self.use_context else None
+        context = product.clone() if self.use_context else None
 
         # Masks for fixed and modifiable nodes
         fixed_nodes = (product.X[..., -1] == 0).unsqueeze(-1)
@@ -624,6 +621,7 @@ class MarkovBridge(pl.LightningModule):
                 node_mask=node_mask,
                 context=context,
                 use_one_hot=use_one_hot,
+                retrieval_emb=retrieval_emb,
             )
 
             # Masking unchanged part
@@ -675,7 +673,6 @@ class MarkovBridge(pl.LightningModule):
             chain_X, chain_E, true_molecule_list, products_list, molecule_list, pred,
             nll.detach().cpu().numpy().tolist(),
             ell.detach().cpu().numpy().tolist(),
-            node_correct,
         )
 
     def visualize(
@@ -729,7 +726,7 @@ class MarkovBridge(pl.LightningModule):
             suffix=f'_{sample_idx}'
         )
 
-    def sample_p_zs_given_zt(self, s, t, X_t, E_t, y_t, X_T, E_T, y_T, node_mask, context=None, use_one_hot=False,):
+    def sample_p_zs_given_zt(self, s, t, X_t, E_t, y_t, X_T, E_T, y_T, node_mask, context=None, use_one_hot=False, retrieval_emb=None):
         # Hack: in direct MB we consider flipped time flow
         bs, n = X_t.shape[:2]
         t = 1 - t
@@ -738,6 +735,7 @@ class MarkovBridge(pl.LightningModule):
         # Neural net predictions
         noisy_data = {'X_t': X_t, 'E_t': E_t, 'y_t': y_t, 't': t, 'node_mask': node_mask}
         extra_data = self.compute_extra_data(noisy_data, context=context)
+        extra_data.y = torch.cat([extra_data.y,retrieval_emb], dim=1)
         pred = self.forward(noisy_data, extra_data, node_mask)
 
         # Normalize predictions

@@ -83,11 +83,11 @@ class RetroBridgeDataset(InMemoryDataset):
 
     @property
     def raw_file_names(self):
-        return ['uspto50k_train_unirxnfp.csv', 'uspto50k_val_unirxnfp.csv', 'uspto50k_test_unirxnfp.csv']
+        return ['uspto50k_train_unirxnGT.csv', 'uspto50k_val_unirxnGT.csv', 'uspto50k_test_unirxnfp.csv']
 
     @property
     def split_file_name(self):
-        return ['uspto50k_train_unirxnfp.csv', 'uspto50k_val_unirxnfp.csv', 'uspto50k_test_unirxnfp.csv']
+        return ['uspto50k_train_unirxnGT.csv', 'uspto50k_val_unirxnGT.csv', 'uspto50k_test_unirxnfp.csv']
 
     @property
     def split_paths(self):
@@ -96,7 +96,7 @@ class RetroBridgeDataset(InMemoryDataset):
 
     @property
     def processed_file_names(self):
-        return [f'train_unirxn.pt', f'val_unirxn.pt', f'test_unirxn.pt']
+        return [f'train_unirxnGT.pt', f'val_unirxnGT.pt', f'test_unirxn.pt']
 
     def download(self):
         os.makedirs(self.raw_dir, exist_ok=True)
@@ -110,8 +110,9 @@ class RetroBridgeDataset(InMemoryDataset):
         table = pd.read_csv(self.split_paths[self.file_idx])
         data_list = []
         for i, row in tqdm(table.iterrows(), total=table.shape[0]):
-            retrieval_list = torch.tensor([int(x) for x in row['retrieval'].split(',')], dtype=torch.long).unsqueeze(0)
-            print(retrieval_list.shape)
+            #retrieval_list = torch.tensor([int(x) for x in row['retrieval'].split(',')], dtype=torch.long).unsqueeze(0)
+            #print(retrieval_list.shape)
+            retrieval_list = torch.tensor([row['retrieval']], dtype=torch.long).unsqueeze(0)
 
             reaction_smiles = row['reactants>reagents>production']
             reactants_smi, _, product_smi = reaction_smiles.split('>')

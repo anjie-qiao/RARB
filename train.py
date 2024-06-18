@@ -204,7 +204,7 @@ def main(args):
 
     wandb_logger = None if args.disable_wandb else loggers.WandbLogger(
         save_dir=args.logs,
-        project='RetroBridge',
+        project='RetrievalBridge',
         group=args.dataset,
         name=experiment,
         id=experiment,
