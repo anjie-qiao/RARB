@@ -36,7 +36,7 @@ def find_last_checkpoint(checkpoints_dir):
 
 def main(args):
     start_time = datetime.now().strftime('%d_%m_%H_%M_%S')
-    run_name = f'{args.experiment_name}_{start_time}'
+    run_name = f'{args.experiment_name}_k={args.retrieval_k}_emb{args.embedding}_{start_time}'
     experiment = run_name if args.resume is None else args.resume
     print(f'EXPERIMENT: {experiment}')
 
@@ -86,7 +86,7 @@ def main(args):
     visualization_tools = MolecularVisualization(dataset_infos)
     
     #(40008,512)
-    encoded_reactants = torch.load("data/uspto50k/raw/tencoded_react_tensor.pt")
+    encoded_reactants = torch.load("data/uspto50k/raw/rxn_encoded_react_tensor.pt")
 
     if args.model == 'RetroBridge':
         model = MarkovBridge(

@@ -64,7 +64,7 @@ class MarkovBridge(pl.LightningModule):
 
         self.retrieval_k = retrieval_k
         self.encoded_reactants = encoded_reactants
-        self.val_encoded_reactants = torch.load("data/uspto50k/raw/tencoded_react_tensor_val.pt")
+        #self.val_encoded_reactants = torch.load("data/uspto50k/raw/tencoded_react_tensor_val.pt")
 
         assert loss_type in ['cross_entropy', 'vlb']
 
@@ -484,7 +484,7 @@ class MarkovBridge(pl.LightningModule):
         :return: molecule_list. Each element of this list is a tuple (atom_types, charges, positions)
         """
 
-        chain_X, chain_E, true_molecule_list, products_list, molecule_list, _, nll, ell, node_correct = self.sample_chain(
+        chain_X, chain_E, true_molecule_list, products_list, molecule_list, _, nll, ell = self.sample_chain(
             data=data,
             batch_size=batch_size,
             keep_chain=keep_chain,
@@ -517,7 +517,7 @@ class MarkovBridge(pl.LightningModule):
         retrieval_list = data.retrieval_list
         retrieval_index = retrieval_list[..., :self.retrieval_k]
         #(bs,k,512)
-        retrieval_emb = self.val_encoded_reactants[retrieval_index]  
+        retrieval_emb = self.encoded_reactants[retrieval_index]  
         #(bs,k*512)
         retrieval_emb = retrieval_emb.flatten(start_dim=1)
 

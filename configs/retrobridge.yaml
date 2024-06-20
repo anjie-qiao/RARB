@@ -1,5 +1,5 @@
 # General
-experiment_name: retrobridge
+experiment_name: retrebridge
 checkpoints: checkpoints
 logs: logs
 data: data
@@ -20,7 +20,7 @@ enable_progress_bar: True
 # Data
 dataset: uspto50k
 batch_size: 64
-num_workers: 64
+num_workers: 32
 shuffle: True
 extra_nodes: True
 swap: False
@@ -39,6 +39,7 @@ n_layers: 5
 hidden_mlp_dims: {'X': 256, 'E': 128, 'y': 128}
 hidden_dims: {'dx': 256, 'de': 64, 'dy': 64, 'n_head': 8, 'dim_ffX': 256, 'dim_ffE': 128, 'dim_ffy': 128}
 retrieval_k: 1
+embedding: rxn
 
 # Training
 n_epochs: 1000

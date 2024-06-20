@@ -53,14 +53,17 @@ def make_dummy_data(rxn, need_map=True):
     return [[main_reactant, sub_reactant], reagent, product, rxn, origin_reactants, origin_product]
 
 ## Morgan Fingerprint Retrieval 
-def morgan_compute_for_one(index, product, query_list, max_size):
-        morgan_gen = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=4096)
-        _, _, product_smi = product[2].split('>') #['reactants>reagents>production']
+def morgan_fingerprint_retrieval(dataset,query_list, max_size):
+    morgan_gen = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=4096)
+    index_list = [None] * len(dataset)
+    sim_list = [None] * len(dataset)
+    for i, reaction_smiles in enumerate(tqdm(dataset['reactants>reagents>production'].values)):
+        reactants_smi, _, product_smi = reaction_smiles.split('>')
+        input_fp = morgan_gen.GetFingerprint(Chem.MolFromSmiles(product_smi))
         result = []
-        for j, query_r in enumerate(query_list):
-            if product_smi == query_r[0]: continue
-            similarity = DataStructs.TanimotoSimilarity(morgan_gen.GetFingerprint(Chem.MolFromSmiles(product_smi)),
-                                                    morgan_gen.GetFingerprint(Chem.MolFromSmiles(query_r[1])))
+        for j, retri_fp in enumerate(query_list):
+            if args.data_tpye == "train" and i==j: continue
+            similarity = DataStructs.TanimotoSimilarity(input_fp,retri_fp)
             if len(result) < max_size:
                 bisect.insort(result, (similarity,j))
             elif similarity > result[0][0]:
@@ -68,35 +71,34 @@ def morgan_compute_for_one(index, product, query_list, max_size):
                 result.pop(0)
         result.reverse()
         str_index = ','.join(map(str, [index for _, index in result]))
-        return index, str_index
-
-def morgan_fingerprint_retrieval(dataset,query_list, max_size):
-    index_list = [None] * len(dataset)
-    with ProcessPoolExecutor(max_workers=32) as executor:
-        futures = [executor.submit(morgan_compute_for_one, i, row, query_list, max_size) for i, row in enumerate(dataset.values)]
-        for future in tqdm(as_completed(futures), total=len(futures), desc="Processing"):
-            index, retri_index = future.result()
-            index_list[index] = retri_index
-    dataset['retrieval'] = index_list
-    return dataset  
+        str_sim = ','.join(map(str, [sim for sim, _ in result]))
+        index_list[i] = str_index
+        sim_list[i] = str_sim
+    dataset['retrieval_index'] = index_list
+    dataset['retrieval_similarity'] = sim_list
+    return dataset
     
 ## embedding Fingerprint Retrieval 
 def embedding_retrieval(dataset,encoded_query,query_list,max_size):
     index_list = []
+    sim_list = []
     for i, query_p in enumerate(encoded_query):
-        retri_list = []
+        result = []
         for j, query_r in enumerate(query_list):
-            if query_p[0] == query_r[0]: continue
-            similarity = compute_similarity(query_p[1].flatten().cpu(), query_r[1].flatten().cpu())
-            if len(retri_list) < max_size:
-                bisect.insort(retri_list, (similarity,j))
-            elif similarity > retri_list[0][0]:
-                bisect.insort(retri_list, (similarity,j))
-                retri_list.pop(0)
-        retri_list.reverse()
-        retri_index = ','.join(map(str, [index for _, index in retri_list]))
-        index_list.append(retri_index)
-    dataset['retrieval'] = index_list
+            if args.data_tpye == "train" and i==j: continue
+            similarity = compute_similarity(query_p.flatten().cpu(), query_r.flatten().cpu())
+            if len(result) < max_size:
+                bisect.insort(result, (similarity,j))
+            elif similarity > result[0][0]:
+                bisect.insort(result, (similarity,j))
+                result.pop(0)
+        result.reverse()
+        str_index = ','.join(map(str, [index for _, index in result]))
+        str_sim = ','.join(map(str, [sim for sim, _ in result]))
+        index_list.append(str_index)
+        sim_list.append(str_sim) 
+    dataset['retrieval_index'] = index_list
+    dataset['retrieval_similarity'] = sim_list
     return dataset
 
 def compute_similarity(query_embedding, dataset_embeddings, metric='cosine'):
@@ -118,21 +120,22 @@ def main(args):
 
     output_f = args.input_file.split('.')[0] + '_unirxnfp.csv'
  
-    retri_index = []
+    retri_list = []
     
     input_df = pd.read_csv(args.input_file)
     retri_df = pd.read_csv(args.retrieval_file)
     encoded_reactants = torch.load(args.embedding_file)
 
     if args.retrieval_type == 'morgan':
-
+        morgan_gen = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=4096)
         for i, reaction_smiles in enumerate(tqdm(retri_df['reactants>reagents>production'].values)):
             reaction_smiles = reaction_smiles.strip()
             reactants_smi, _, product_smi = reaction_smiles.split('>')
-            retri_index.append((product_smi,reactants_smi))
-        input_df = morgan_fingerprint_retrieval(input_df, retri_index, max_size)
+            retri_fp = morgan_gen.GetFingerprint(Chem.MolFromSmiles(reactants_smi))
+            retri_list.append(retri_fp)
+        input_df = morgan_fingerprint_retrieval(input_df, retri_list, max_size)
     
-    elif args.retrieval_type == 'embedding':
+    elif args.retrieval_type == 'rxn-embedding':
         model = Pretrain_Graph(cfg, stage='inference')
         model = model.load_from_checkpoint(args.model_dir)
         model = model.to(device)
@@ -141,7 +144,7 @@ def main(args):
             reaction_smiles = reaction_smiles.strip()
             _, _, product_smi = reaction_smiles.split('>')
             reactant_fp = encoded_reactants[i]
-            retri_index.append((product_smi,reactant_fp))
+            retri_list.append(reactant_fp)
 
         encoded_query = [] 
         for i, reaction_smiles in enumerate(tqdm(input_df['reactants>reagents>production'].values)):
@@ -149,8 +152,8 @@ def main(args):
             _, _, product_smi = reaction_smiles.split('>')
             dummy_data = make_dummy_data(reaction_smiles, need_map=True)
             _, product_fp = model.generate_reaction_fp_mix(dummy_data, device, no_reagent=True)#set to True if you want to ignore reagents
-            encoded_query.append((product_smi,product_fp))
-        input_df = embedding_retrieval(input_df, encoded_query, retri_index, max_size)
+            encoded_query.append(product_fp)
+        input_df = embedding_retrieval(input_df, encoded_query, retri_list, max_size)
 
     input_df.to_csv(output_f, index=False)
 
@@ -160,6 +163,7 @@ if __name__ == '__main__':
     argparser.add_argument('--input_file', type=str, help='path to the input file for query')
     argparser.add_argument('--retrieval_file', type=str, help='path to the retrieval_file for featurization')
     argparser.add_argument('--embedding_file', type=str,)
+    argparser.add_argument('--data_tpye', type=str,)
     argparser.add_argument('--retrieval_type', type=str, help='select retrieval type for dataset')
     argparser.add_argument('--config_path', type=str, default='config/')
     args = argparser.parse_args()

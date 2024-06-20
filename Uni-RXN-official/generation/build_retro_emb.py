@@ -79,8 +79,8 @@ def main(args):
     encoded_products = torch.cat(encoded_products,dim=0)
     print(encoded_reactants.shape)
     print(encoded_products.shape)
-    torch.save(encoded_reactants, 'tencoded_react_tensor_val.pt')
-    torch.save(encoded_products, 'tencoded_prod_tensor_val.pt')
+    torch.save(encoded_reactants, 'rxn_encoded_react_tensor_val.pt')
+    torch.save(encoded_products, 'rxn_encoded_prod_tensor_val.pt')
     
 if __name__ == '__main__':
     argparser = argparse.ArgumentParser()
