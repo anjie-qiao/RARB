@@ -1,9 +1,3 @@
-
-
-
-
-
-
 from ctypes.wintypes import PINT
 from curses import noecho
 from multiprocessing import context
@@ -877,11 +871,11 @@ class MarkovBridge(pl.LightningModule):
             p_X_T = F.gumbel_softmax(pred.X, tau=1.0, hard=True)
             p_E_T = F.gumbel_softmax(pred.X, tau=1.0, hard=True)
 
-            z_T = utils.PlaceHolder(X_T_i, E_T_i)
+            z_T = utils.PlaceHolder(p_X_T, p_E_T)
             prob_X_i, prob_E_i = self.compute_q_zs_given_q_zt(z_t, z_T, node_mask, t)  # bs, n, d and bs, n, n, d
 
-            prob_X += (1 / 4) * prob_X_i * p_X_T  # bs, n, d
-            prob_E += (1 / 4) * prob_E_i * p_E_T  # bs, n, n, d
+            prob_X += (1 / 4) * prob_X_i # bs, n, d
+            prob_E += (1 / 4) * prob_E_i # bs, n, n, d
 
         assert ((prob_X.sum(dim=-1) - 1).abs() < 1e-4).all()
         assert ((prob_E.sum(dim=-1) - 1).abs() < 1e-4).all()
