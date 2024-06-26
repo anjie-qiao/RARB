@@ -13,6 +13,31 @@ from src.frameworks import diffusion_utils
 from src.models.layers import Xtoy, Etoy, masked_softmax
 
 
+class AugmentedGraphFeatureEncoder(nn.Module):
+
+    def __init__(self, raw_y_dim, graph_emb_dim, y_hidden_mlp_dim, y_hidden_dim, act_fn_in, dropout):
+
+        super(AugmentedGraphFeatureEncoder, self).__init__()
+
+        self.raw_y_dim = raw_y_dim
+        self.y_mlp = nn.Sequential(nn.Linear(raw_y_dim, y_hidden_mlp_dim), act_fn_in,
+                                   nn.Linear(y_hidden_mlp_dim, y_hidden_dim), act_fn_in)
+
+        self.graph_emb_dim = graph_emb_dim
+        # TODO: impl vanilla self-attention layer
+        self.attn_layer = 
+
+    def forward(self, y: Tensor):
+        graph_level_part = self.y_mlp(y[:,:self.raw_y_dim])
+
+        # assume the graph embedding is 512-dim
+        aug_graph_tokens = torch.reshape(y[:,self.raw_y_dim:], [y.size(0), -1, self.graph_emb_dim])
+        # TODO: forward
+        aug_graph_part = 
+
+        return graph_level_part + aug_graph_part
+
+
 class XEyTransformerLayer(nn.Module):
     """ Transformer that updates node, edge and global features
         d_x: node features
