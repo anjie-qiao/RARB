@@ -866,6 +866,28 @@ class MarkovBridge(pl.LightningModule):
 
         return prob_X, prob_E
 
+    def my_compute_p_zs_given_p_zt(self, z_t, pred, node_mask, t):
+
+        prob_X = torch.zeros_like(p_X_T)  # bs, n, d
+        prob_E = torch.zeros_like(p_E_T)  # bs, n, n, d
+
+        # TODO: allow customizable #iterations
+        for i in range(4):
+            # TODO: tau decays from 10.0 to 0.1
+            p_X_T = F.gumbel_softmax(pred.X, tau=1.0, hard=True)
+            p_E_T = F.gumbel_softmax(pred.X, tau=1.0, hard=True)
+
+            z_T = utils.PlaceHolder(X_T_i, E_T_i)
+            prob_X_i, prob_E_i = self.compute_q_zs_given_q_zt(z_t, z_T, node_mask, t)  # bs, n, d and bs, n, n, d
+
+            prob_X += (1 / 4) * prob_X_i * p_X_T  # bs, n, d
+            prob_E += (1 / 4) * prob_E_i * p_E_T  # bs, n, n, d
+
+        assert ((prob_X.sum(dim=-1) - 1).abs() < 1e-4).all()
+        assert ((prob_E.sum(dim=-1) - 1).abs() < 1e-4).all()
+
+        return prob_X, prob_E
+
     def compute_extra_data(self, noisy_data, context=None, condition_on_t=True):
         """ At every training step (after adding noise) and step in sampling, compute extra information and append to
             the network input. """
