@@ -110,7 +110,8 @@ class MarkovBridge(pl.LightningModule):
             hidden_dims=hidden_dims,
             output_dims=output_dims,
             act_fn_in=nn.ReLU(),
-            act_fn_out=nn.ReLU()
+            act_fn_out=nn.ReLU(),
+            retrieval_k=retrieval_k,
         )
         self.noise_schedule = PredefinedNoiseScheduleDiscrete(
             noise_schedule=diffusion_noise_schedule,

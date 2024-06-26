@@ -307,6 +307,7 @@ class RetroBridgeDataModule(MolecularDataModule):
                 batch_size=self.batch_size,
                 num_workers=self.num_workers,
                 shuffle=(self.shuffle and split == 'train'),
+                prefetch_factor = 8,
             )
 
         self.train_smiles = datasets['train'].r_smiles
@@ -429,7 +430,7 @@ class RetroBridgeDatasetInfos:
         self.input_dims['E'] += ex_extra_molecular_feat.E.size(-1)
         self.input_dims['y'] += ex_extra_molecular_feat.y.size(-1)
 
-        self.input_dims['y'] += 512 * retrieval_k
+        #self.input_dims['y'] += 512 * retrieval_k
 
         if use_context:
             self.input_dims['X'] += (example_batch['x'].size(1))
