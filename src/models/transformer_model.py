@@ -15,7 +15,7 @@ from src.models.layers import Xtoy, Etoy, masked_softmax
 
 class AugmentedGraphFeatureEncoder(nn.Module):
 
-    def __init__(self, raw_y_dim, y_hidden_mlp_dim, y_hidden_dim, retrieval_k, act_fn_in, graph_emb_dim: int=512, dropout: float = 0.1):
+    def __init__(self, raw_y_dim, y_hidden_mlp_dim, y_hidden_dim, retrieval_k, act_fn_in: nn.ReLU(), graph_emb_dim: int=512, dropout: float = 0.1):
 
         super(AugmentedGraphFeatureEncoder, self).__init__()
     
@@ -27,6 +27,7 @@ class AugmentedGraphFeatureEncoder(nn.Module):
         # TODO: impl vanilla self-attention layer
         self.attn_layer = nn.MultiheadAttention(graph_emb_dim, num_heads=8, batch_first=True) 
         self.attn_linear = nn.Linear(graph_emb_dim*retrieval_k, y_hidden_dim)
+        self.attn_act = act_fn_in
 
     def forward(self, y: Tensor):
         graph_level_part = self.y_mlp(y[:,:self.raw_y_dim])
@@ -37,7 +38,7 @@ class AugmentedGraphFeatureEncoder(nn.Module):
         # TODO: forward
         attn_graph_part, _ = self.attn_layer(aug_graph_tokens, aug_graph_tokens, aug_graph_tokens)
         attn_graph_part = torch.reshape(attn_graph_part, [attn_graph_part.size(0), -1])  # bs, graph_emb_dim*k
-        aug_graph_part = act_fn_in(self.attn_linear(attn_graph_part)) # bs, y_hidden_dim
+        aug_graph_part = self.attn_act(self.attn_linear(attn_graph_part)) # bs, y_hidden_dim
 
         return graph_level_part + aug_graph_part 
 
