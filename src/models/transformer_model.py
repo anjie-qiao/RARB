@@ -37,7 +37,7 @@ class AugmentedGraphFeatureEncoder(nn.Module):
         # TODO: forward
         attn_graph_part, _ = self.attn_layer(aug_graph_tokens, aug_graph_tokens, aug_graph_tokens)
         attn_graph_part = torch.reshape(attn_graph_part, [attn_graph_part.size(0), -1])  # bs, graph_emb_dim*k
-        aug_graph_part = self.attn_linear(attn_graph_part) # bs, y_hidden_dim
+        aug_graph_part = act_fn_in(self.attn_linear(attn_graph_part)) # bs, y_hidden_dim
 
         return graph_level_part + aug_graph_part 
 
