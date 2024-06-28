@@ -21,30 +21,45 @@ class AugmentedGraphFeatureEncoder(nn.Module):
     
         self.raw_y_dim = raw_y_dim
         self.y_mlp = nn.Sequential(nn.Linear(raw_y_dim, y_hidden_mlp_dim), act_fn_in,
-                                   nn.Linear(y_hidden_mlp_dim, y_hidden_dim), act_fn_in)
+                                   nn.Linear(y_hidden_mlp_dim, y_hidden_dim))
 
         self.graph_emb_dim = graph_emb_dim
-        # TODO: impl vanilla self-attention layer
-        self.attn_layer = nn.MultiheadAttention(graph_emb_dim, num_heads=8, batch_first=True) 
+        self.dropout0 = nn.Dropout(dropout)
+        # TODO: allow to specify num_head, kdim, and vdim
+        self.attn_layer = nn.MultiheadAttention(graph_emb_dim, num_heads=8, dropout=dropout, batch_first=True)
+        self.dropout1 = nn.Dropout(dropout)
+        self.norm1 = LayerNorm(graph_emb_dim)
+        # TODO: 512 --> 128 --> 512? Does it work?
+        self.attn_ffn = nn.Sequential(nn.Linear(graph_emb_dim, y_hidden_mlp_dim), act_fn_in, nn.Dropout(dropout),
+                                      nn.Linear(y_hidden_mlp_dim, graph_emb_dim))
+        self.dropout2 = nn.Dropout(dropout)
+        self.norm2 = LayerNorm(graph_emb_dim)
         self.pooling_layer = nn.AdaptiveAvgPool1d(1)
-        self.attn_linear = nn.Linear(graph_emb_dim, y_hidden_dim)
+        self.final_linear = nn.Linear(graph_emb_dim, y_hidden_dim)
+
         self.attn_act = act_fn_in
-        self.dropout = nn.Dropout(dropout)
 
     def forward(self, y: Tensor):
         graph_level_part = self.y_mlp(y[:,:self.raw_y_dim])
 
         # assume the graph embedding is 512-dim
+        # TODO: add PE to it?
         aug_graph_tokens = torch.reshape(y[:,self.raw_y_dim:], [y.size(0), -1, self.graph_emb_dim])
+        aug_graph_tokens = self.dropout0(aug_graph_tokens)
 
-        # TODO: forward
-        attn_graph_part, _ = self.attn_layer(aug_graph_tokens, aug_graph_tokens, aug_graph_tokens)
-        attn_graph_part = attn_graph_part.permute(0, 2, 1)  # bs, 512, k 
+        attn_graph_part = self.attn_layer(aug_graph_tokens, aug_graph_tokens, aug_graph_tokens, need_weights=False)
+        attn_graph_part = self.dropout1(attn_graph_part)
+        attn_graph_part_inter = self.norm1(aug_graph_tokens + attn_graph_part)
+        attn_graph_part = self.attn_ffn(attn_graph_part_inter)
+        attn_graph_part = self.dropout2(attn_graph_part)
+        attn_graph_part = self.norm2(attn_graph_part_inter + attn_graph_part)
+
+        attn_graph_part = attn_graph_part.permute(0, 2, 1)  # bs, 512, k
         pooled_output = self.pooling_layer(attn_graph_part)  # bs, 512, 1
-        pooled_output = pooled_output.squeeze(-1)  # bs, 512 
-        aug_graph_part = self.dropout(self.attn_act(self.attn_linear(pooled_output))) # bs, y_hidden_dim
+        pooled_output = pooled_output.squeeze(-1)  # bs, 512
+        pooled_output = self.final_linear(pooled_output) # bs, 64
 
-        return graph_level_part + aug_graph_part 
+        return self.attn_act(graph_level_part + pooled_output)
 
 
 class XEyTransformerLayer(nn.Module):
@@ -254,7 +269,8 @@ class GraphTransformer(nn.Module):
     """
     def __init__(self, n_layers: int, input_dims: dict, hidden_mlp_dims: dict, hidden_dims: dict,
                  output_dims: dict, act_fn_in: nn.ReLU(), act_fn_out: nn.ReLU(), addition=True, retrieval_k=0, 
-                 augmented_graphfeature=False, ):
+                 augmented_graphfeature=False):
+        # TODO: dropout can NOT be specificed by users now, which is an critical hyper-parameter that deserves optimization later.
         super().__init__()
         self.n_layers = n_layers
         self.out_dim_X = output_dims['X']
