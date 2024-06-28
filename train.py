@@ -60,6 +60,8 @@ def main(args):
         extra_nodes=args.extra_nodes,
         swap=args.swap,
         evaluation=False,
+        retrieval_dataset=args.retrieval_dataset,
+        augmented_graphfeature=args.augmented_graphfeature,
     )
     dataset_infos = RetroBridgeDatasetInfos(datamodule)
 
@@ -86,7 +88,11 @@ def main(args):
     visualization_tools = MolecularVisualization(dataset_infos)
     
     #(40008,512)
-    encoded_reactants = torch.load("data/uspto50k/raw/rxn_encoded_react_tensor.pt")
+    if args.retrieval_dataset == "50k":
+        encoded_reactants = torch.load("data/uspto50k/raw/rxn_encoded_react_tensor.pt")
+    elif args.retrieval_dataset == "application":
+        encoded_reactants = torch.load("data/uspto50k/raw/rxn_encoded_reac_uspto_full.pt")
+    else: encoded_reactants = None
 
     if args.model == 'RetroBridge':
         model = MarkovBridge(
@@ -121,6 +127,7 @@ def main(args):
             loss_type=args.loss_type,
             retrieval_k=args.retrieval_k,
             encoded_reactants=encoded_reactants,
+            augmented_graphfeature=args.augmented_graphfeature,
         )
     elif args.model == 'DiGress':
         model = DiscreteDiffusion(

@@ -58,6 +58,7 @@ class MarkovBridge(pl.LightningModule):
             loss_type='cross_entropy',
             retrieval_k=0,
             encoded_reactants=None,
+            augmented_graphfeature=False,
     ):
 
         super().__init__()
@@ -112,6 +113,7 @@ class MarkovBridge(pl.LightningModule):
             act_fn_in=nn.ReLU(),
             act_fn_out=nn.ReLU(),
             retrieval_k=retrieval_k,
+            augmented_graphfeature=augmented_graphfeature,
         )
         self.noise_schedule = PredefinedNoiseScheduleDiscrete(
             noise_schedule=diffusion_noise_schedule,
@@ -162,12 +164,13 @@ class MarkovBridge(pl.LightningModule):
         product = product.mask(p_node_mask)
 
         #(bs,k)
-        retrieval_list = data.retrieval_list
-        retrieval_index = retrieval_list[..., :self.retrieval_k]
-        #(bs,k,512)
-        retrieval_emb = self.encoded_reactants[retrieval_index]  
-        #(bs,k*512)
-        retrieval_emb = retrieval_emb.flatten(start_dim=1)
+        if self.retrieval_k > 0 :
+            retrieval_list = data.retrieval_list
+            retrieval_index = retrieval_list[..., :self.retrieval_k]
+            #(bs,k,512)
+            retrieval_emb = self.encoded_reactants[retrieval_index]  
+            #(bs,k*512)
+            retrieval_emb = retrieval_emb.flatten(start_dim=1)
 
         assert torch.allclose(r_node_mask, p_node_mask)
         node_mask = r_node_mask
@@ -183,7 +186,7 @@ class MarkovBridge(pl.LightningModule):
         # Computing extra features + context and making predictions
         context = product.clone() if self.use_context else None
         extra_data = self.compute_extra_data(noisy_data, context=context)
-        extra_data.y = torch.cat([extra_data.y,retrieval_emb], dim=1)
+        if self.retrieval_k > 0 : extra_data.y = torch.cat([extra_data.y,retrieval_emb], dim=1)
         pred = self.forward(noisy_data, extra_data, node_mask)
 
         # Masking unchanged part

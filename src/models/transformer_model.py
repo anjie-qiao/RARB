@@ -26,8 +26,10 @@ class AugmentedGraphFeatureEncoder(nn.Module):
         self.graph_emb_dim = graph_emb_dim
         # TODO: impl vanilla self-attention layer
         self.attn_layer = nn.MultiheadAttention(graph_emb_dim, num_heads=8, batch_first=True) 
-        self.attn_linear = nn.Linear(graph_emb_dim*retrieval_k, y_hidden_dim)
+        self.pooling_layer = nn.AdaptiveAvgPool1d(1)
+        self.attn_linear = nn.Linear(graph_emb_dim, y_hidden_dim)
         self.attn_act = act_fn_in
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, y: Tensor):
         graph_level_part = self.y_mlp(y[:,:self.raw_y_dim])
@@ -37,8 +39,10 @@ class AugmentedGraphFeatureEncoder(nn.Module):
 
         # TODO: forward
         attn_graph_part, _ = self.attn_layer(aug_graph_tokens, aug_graph_tokens, aug_graph_tokens)
-        attn_graph_part = torch.reshape(attn_graph_part, [attn_graph_part.size(0), -1])  # bs, graph_emb_dim*k
-        aug_graph_part = self.attn_act(self.attn_linear(attn_graph_part)) # bs, y_hidden_dim
+        attn_graph_part = attn_graph_part.permute(0, 2, 1)  # bs, 512, k 
+        pooled_output = self.pooling_layer(attn_graph_part)  # bs, 512, 1
+        pooled_output = pooled_output.squeeze(-1)  # bs, 512 
+        aug_graph_part = self.dropout(self.attn_act(self.attn_linear(pooled_output))) # bs, y_hidden_dim
 
         return graph_level_part + aug_graph_part 
 
@@ -249,7 +253,8 @@ class GraphTransformer(nn.Module):
     dims : dict -- contains dimensions for each feature type
     """
     def __init__(self, n_layers: int, input_dims: dict, hidden_mlp_dims: dict, hidden_dims: dict,
-                 output_dims: dict, act_fn_in: nn.ReLU(), act_fn_out: nn.ReLU(), addition=True, retrieval_k=0):
+                 output_dims: dict, act_fn_in: nn.ReLU(), act_fn_out: nn.ReLU(), addition=True, retrieval_k=0, 
+                 augmented_graphfeature=False, ):
         super().__init__()
         self.n_layers = n_layers
         self.out_dim_X = output_dims['X']
@@ -263,15 +268,16 @@ class GraphTransformer(nn.Module):
         self.mlp_in_E = nn.Sequential(nn.Linear(input_dims['E'], hidden_mlp_dims['E']), act_fn_in,
                                       nn.Linear(hidden_mlp_dims['E'], hidden_dims['de']), act_fn_in)
 
-        self.mlp_in_y = nn.Sequential(nn.Linear(input_dims['y'], hidden_mlp_dims['y']), act_fn_in,
-                                       nn.Linear(hidden_mlp_dims['y'], hidden_dims['dy']), act_fn_in)
-        
-        self.attn_in_y = AugmentedGraphFeatureEncoder(raw_y_dim=input_dims['y'],
+        if augmented_graphfeature:
+            self.model_in_y = AugmentedGraphFeatureEncoder(raw_y_dim=input_dims['y'],
                                                       y_hidden_mlp_dim=hidden_mlp_dims['y'],
                                                       y_hidden_dim=hidden_dims['dy'],
                                                       retrieval_k=retrieval_k,
                                                       act_fn_in=act_fn_in
                                                       )
+        else:
+            self.model_in_y = nn.Sequential(nn.Linear(input_dims['y'], hidden_mlp_dims['y']), act_fn_in,
+                                       nn.Linear(hidden_mlp_dims['y'], hidden_dims['dy']), act_fn_in)   
 
         self.tf_layers = nn.ModuleList([XEyTransformerLayer(dx=hidden_dims['dx'],
                                                             de=hidden_dims['de'],
@@ -303,7 +309,7 @@ class GraphTransformer(nn.Module):
 
         new_E = self.mlp_in_E(E)
         new_E = (new_E + new_E.transpose(1, 2)) / 2
-        after_in = utils.PlaceHolder(X=self.mlp_in_X(X), E=new_E, y=self.attn_in_y(y)).mask(node_mask)
+        after_in = utils.PlaceHolder(X=self.mlp_in_X(X), E=new_E, y=self.model_in_y(y)).mask(node_mask)
         X, E, y = after_in.X, after_in.E, after_in.y
 
         for layer in self.tf_layers:

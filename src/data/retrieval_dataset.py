@@ -39,9 +39,12 @@ class RetroBridgeDataset(InMemoryDataset):
         Chem.BondType.AROMATIC: 3
     }
 
-    def __init__(self, stage, root, extra_nodes=False, swap=False):
+    def __init__(self, stage, root, extra_nodes=False, swap=False, 
+                 retrieval_dataset=None, augmented_graphfeature=False):
         self.stage = stage
         self.extra_nodes = extra_nodes
+        self.retrieval_dataset = retrieval_dataset
+        self.augmented_graphfeature = augmented_graphfeature
 
         if self.stage == 'train':
             self.file_idx = 0
@@ -83,11 +86,20 @@ class RetroBridgeDataset(InMemoryDataset):
 
     @property
     def raw_file_names(self):
-        return ['uspto50k_train_unirxnfp.csv', 'uspto50k_val_unirxnfp.csv', 'uspto50k_test_unirxnfp.csv']
-
+        if self.retrieval_dataset == '50k':
+            return ['uspto50k_train_unirxnfp.csv', 'uspto50k_val_unirxnfp.csv', 'uspto50k_test_unirxnfp.csv']
+        elif self.retrieval_dataset == 'application':
+            return ['uspto50k_train_application.csv', 'uspto50k_val_application.csv', 'uspto50k_test_application.csv']
+        else:
+            return ['uspto50k_train.csv', 'uspto50k_val.csv', 'uspto50k_test.csv']
     @property
     def split_file_name(self):
-        return ['uspto50k_train_unirxnfp.csv', 'uspto50k_val_unirxnfp.csv', 'uspto50k_test_unirxnfp.csv']
+        if self.retrieval_dataset == '50k':
+            return ['uspto50k_train_unirxnfp.csv', 'uspto50k_val_unirxnfp.csv', 'uspto50k_test_unirxnfp.csv']
+        elif self.retrieval_dataset == 'application':
+            return ['uspto50k_train_application.csv', 'uspto50k_val_application.csv', 'uspto50k_test_application.csv']
+        else:
+            return ['uspto50k_train.csv', 'uspto50k_val.csv', 'uspto50k_test.csv']
 
     @property
     def split_paths(self):
@@ -96,8 +108,13 @@ class RetroBridgeDataset(InMemoryDataset):
 
     @property
     def processed_file_names(self):
-        return [f'train_unirxn.pt', f'val_unirxn.pt', f'test_unirxn.pt']
-
+        if self.retrieval_dataset == '50k':
+            return [f'train_unirxn.pt', f'val_unirxn.pt', f'test_unirxn.pt']
+        elif self.retrieval_dataset == 'application':
+            return [f'train_application.pt', f'val_application.pt', f'test_application.pt']
+        else:
+            return [f'train.pt', f'val.pt', f'test.pt']
+        
     def download(self):
         os.makedirs(self.raw_dir, exist_ok=True)
         for fname in self.raw_file_names:
@@ -283,21 +300,24 @@ class RetroBridgeMITDataset(RetroBridgeDataset):
 class RetroBridgeDataModule(MolecularDataModule):
     DATASET_CLASS = RetroBridgeDataset
 
-    def __init__(self, data_root, batch_size, num_workers, shuffle, extra_nodes=False, evaluation=False, swap=False):
+    def __init__(self, data_root, batch_size, num_workers, shuffle, extra_nodes=False, evaluation=False, swap=False,
+                 retrieval_dataset=None, augmented_graphfeature=False):
         super().__init__(batch_size, num_workers, shuffle)
         self.extra_nodes = extra_nodes
         self.evaluation = evaluation
         self.swap = swap
         self.data_root = data_root
         self.train_smiles = []
-        self.prepare_data()
+        self.retrieval_dataset=retrieval_dataset
+        self.augmented_graphfeature = augmented_graphfeature
+        self.prepare_data() 
 
     def prepare_data(self) -> None:
         stage = 'val' if self.evaluation else 'train'
         datasets = {
-            'train': self.DATASET_CLASS(stage=stage, root=self.data_root, extra_nodes=self.extra_nodes, swap=self.swap),
-            'val': self.DATASET_CLASS(stage='val', root=self.data_root, extra_nodes=self.extra_nodes, swap=self.swap),
-            'test': self.DATASET_CLASS(stage='test', root=self.data_root, extra_nodes=self.extra_nodes, swap=self.swap),
+            'train': self.DATASET_CLASS(stage=stage, root=self.data_root, extra_nodes=self.extra_nodes, swap=self.swap,retrieval_dataset=self.retrieval_dataset, augmented_graphfeature=self.augmented_graphfeature),
+            'val': self.DATASET_CLASS(stage='val', root=self.data_root, extra_nodes=self.extra_nodes, swap=self.swap,retrieval_dataset=self.retrieval_dataset, augmented_graphfeature=self.augmented_graphfeature),
+            'test': self.DATASET_CLASS(stage='test', root=self.data_root, extra_nodes=self.extra_nodes, swap=self.swap,retrieval_dataset=self.retrieval_dataset, augmented_graphfeature=self.augmented_graphfeature),
         }
 
         self.dataloaders = {}
@@ -307,7 +327,6 @@ class RetroBridgeDataModule(MolecularDataModule):
                 batch_size=self.batch_size,
                 num_workers=self.num_workers,
                 shuffle=(self.shuffle and split == 'train'),
-                prefetch_factor = 8,
             )
 
         self.train_smiles = datasets['train'].r_smiles
@@ -351,7 +370,7 @@ class RetroBridgeDatasetInfos:
             1: 14.01, 2: 12.01, 3: 16., 4: 32.06, 5: 35.45, 6: 19., 7: 10.81, 8: 79.91, 9: 30.98,
             10: 28.01, 11: 126.9, 12: 118.71, 13: 24.31, 14: 63.55, 15: 65.38, 16: 78.97, 17: 0.0
         }
-
+        self.augmented_graphfeature  = datamodule.augmented_graphfeature
         if datamodule.extra_nodes:
             info_dir = f'{datamodule.data_root}/info_retrobridge_extra_nodes'
         else:
@@ -430,7 +449,7 @@ class RetroBridgeDatasetInfos:
         self.input_dims['E'] += ex_extra_molecular_feat.E.size(-1)
         self.input_dims['y'] += ex_extra_molecular_feat.y.size(-1)
 
-        #self.input_dims['y'] += 512 * retrieval_k
+        if not self.augmented_graphfeature: self.input_dims['y'] += 512 * retrieval_k
 
         if use_context:
             self.input_dims['X'] += (example_batch['x'].size(1))

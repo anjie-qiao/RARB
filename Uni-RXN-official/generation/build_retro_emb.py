@@ -27,25 +27,30 @@ rxn_mapper = RXNMapper()
 def make_dummy_data(rxn, need_map=True):
     # if len(rxn) > 512:
     #     return None
-    origin_reactants, _, origin_product = rxn.split('>')
-    if need_map:
-        rxn = rxn_mapper.get_attention_guided_atom_maps([rxn])[0]['mapped_rxn']
-    line1, line2, line3 = rxn.split('>')
-    line1 = line1.split('.')
-    line2 = line2.split('.')
-    reactant = line1 + line2
-    product = line3
-    reagent = [r for r in reactant if ':' not in r]
-    reactant = [r for r in reactant if ':' in r]
-    map_num = [len(r.split(':')) - 1 for r in reactant]
-    main_reactant = reactant[map_num.index(max(map_num))]
-    sub_reactant = [r for r in reactant if r != main_reactant]
-    #pad to dummies
-    sub_reactant = [r for r in sub_reactant if r != '']
-    main_reactant = [main_reactant, []]
-    sub_reactant = [[r, []] for r in sub_reactant]
-    reagent = '.'.join(reagent)
-    return [[main_reactant, sub_reactant], reagent, product, rxn, origin_reactants, origin_product]
+    try:
+        origin_reactants, _, origin_product = rxn.split('>')
+        if need_map:
+            rxn = rxn_mapper.get_attention_guided_atom_maps([rxn])[0]['mapped_rxn']
+        line1, line2, line3 = rxn.split('>')
+        line1 = line1.split('.')
+        line2 = line2.split('.')
+        reactant = line1 + line2
+        product = line3
+        reagent = [r for r in reactant if ':' not in r]
+        reactant = [r for r in reactant if ':' in r]
+        map_num = [len(r.split(':')) - 1 for r in reactant]
+        main_reactant = reactant[map_num.index(max(map_num))]
+        sub_reactant = [r for r in reactant if r != main_reactant]
+        #pad to dummies
+        sub_reactant = [r for r in sub_reactant if r != '']
+        main_reactant = [main_reactant, []]
+        sub_reactant = [[r, []] for r in sub_reactant]
+        reagent = '.'.join(reagent)
+        return [[main_reactant, sub_reactant], reagent, product, rxn, origin_reactants, origin_product]
+    except Exception as e:
+        print(f"Error processing rxn: {rxn}")
+        print(f"Error: {e}")
+        return "error"
 
 
 def main(args):
@@ -66,15 +71,25 @@ def main(args):
 
     encoded_reactants = []
     encoded_products = []
+    error_indices = []
     retri_df = pd.read_csv(args.retrieval_file)
 
     for i, reaction_smiles in enumerate(tqdm(retri_df['reactants>reagents>production'].values)):
         reaction_smiles = reaction_smiles.strip()
         dummy_data = make_dummy_data(reaction_smiles, need_map=True)
         #embedding shape: (1, 512)
-        reactant_fp, product_fp = model.generate_reaction_fp_mix(dummy_data, device, no_reagent=True)#set to True if you want to ignore reagents
-        encoded_reactants.append(reactant_fp)
-        encoded_products.append(product_fp)
+        if dummy_data != "error":
+            reactant_fp, product_fp = model.generate_reaction_fp_mix(dummy_data, device, no_reagent=True)#set to True if you want to ignore reagents
+            encoded_reactants.append(reactant_fp)
+            encoded_products.append(product_fp)
+        else:
+            error_indices.append(i)
+
+    retri_df.drop(error_indices, inplace=True)
+    retri_df.to_csv(args.retrieval_file.split('.')[0] + "_filter.csv", index=False)
+    error_indices = pd.DataFrame(error_indices)
+    error_indices.to_csv("error_indices.csv", index=False)
+    
     encoded_reactants = torch.cat(encoded_reactants,dim=0)
     encoded_products = torch.cat(encoded_products,dim=0)
     print(encoded_reactants.shape)
