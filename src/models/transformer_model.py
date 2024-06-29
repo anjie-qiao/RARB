@@ -13,6 +13,62 @@ from src.frameworks import diffusion_utils
 from src.models.layers import Xtoy, Etoy, masked_softmax
 
 
+class AugmentedGraphFeatureEncoder(nn.Module):
+
+    def __init__(self, raw_y_dim, y_hidden_mlp_dim, y_hidden_dim, retrieval_k, act_fn_in: nn.ReLU(), graph_emb_dim: int=512, dropout: float = 0.1,
+                 kdim : int=512, vdim: int=512, num_heads: int=8):
+
+        super(AugmentedGraphFeatureEncoder, self).__init__()
+    
+        self.raw_y_dim = raw_y_dim
+        self.retrieval_k =retrieval_k
+        self.y_mlp = nn.Sequential(nn.Linear(raw_y_dim, y_hidden_mlp_dim), act_fn_in,
+                                   nn.Linear(y_hidden_mlp_dim, y_hidden_dim))
+
+        self.graph_emb_dim = graph_emb_dim
+        self.dropout0 = nn.Dropout(dropout)
+        # TODO: allow to specify num_head, kdim, and vdim
+        self.attn_layer = nn.MultiheadAttention(graph_emb_dim, num_heads=num_heads, kdim=kdim, vdim=vdim, dropout=dropout, batch_first=True)
+        self.PE_layer = torch.nn.Linear(1, graph_emb_dim)
+        self.dropout1 = nn.Dropout(dropout)
+        self.norm1 = LayerNorm(graph_emb_dim)
+        # TODO: 512 --> 128 --> 512? Does it work?
+        self.attn_ffn = nn.Sequential(nn.Linear(graph_emb_dim, y_hidden_mlp_dim), act_fn_in, nn.Dropout(dropout),
+                                      nn.Linear(y_hidden_mlp_dim, graph_emb_dim))
+        self.dropout2 = nn.Dropout(dropout)
+        self.norm2 = LayerNorm(graph_emb_dim)
+        self.pooling_layer = nn.AdaptiveAvgPool1d(1)
+        self.final_linear = nn.Linear(graph_emb_dim, y_hidden_dim)
+
+        self.attn_act = act_fn_in
+
+    def forward(self, y: Tensor):
+        graph_level_part = self.y_mlp(y[:,:self.raw_y_dim])
+
+        # assume the graph embedding is 512-dim
+        # TODO: add PE to it?
+        # add a simply learnable linear layer as position embedding
+        reshape_emb = torch.reshape(y[:,self.raw_y_dim:], [y.size(0), -1, self.graph_emb_dim + 1])
+        ranks = reshape_emb[..., -1].unsqueeze(-1)# bs, k, 1
+        aug_graph_tokens = reshape_emb[..., :self.graph_emb_dim] # bs, k ,512
+        rank_PE = self.PE_layer(ranks) # bs, k ,512
+        aug_graph_tokens = self.dropout0(aug_graph_tokens + rank_PE)
+
+        attn_graph_part= self.attn_layer(aug_graph_tokens, aug_graph_tokens, aug_graph_tokens, need_weights=False)
+        attn_graph_part = self.dropout1(attn_graph_part[0]) #in our torch version, nn.MultiheadAttention return a tuple
+        attn_graph_part_inter = self.norm1(aug_graph_tokens + attn_graph_part)
+        attn_graph_part = self.attn_ffn(attn_graph_part_inter)
+        attn_graph_part = self.dropout2(attn_graph_part)
+        attn_graph_part = self.norm2(attn_graph_part_inter + attn_graph_part)
+
+        attn_graph_part = attn_graph_part.permute(0, 2, 1)  # bs, 512, k
+        pooled_output = self.pooling_layer(attn_graph_part)  # bs, 512, 1
+        pooled_output = pooled_output.squeeze(-1)  # bs, 512
+        pooled_output = self.final_linear(pooled_output) # bs, 64
+
+        return self.attn_act(graph_level_part + pooled_output)
+
+
 class XEyTransformerLayer(nn.Module):
     """ Transformer that updates node, edge and global features
         d_x: node features
@@ -219,7 +275,9 @@ class GraphTransformer(nn.Module):
     dims : dict -- contains dimensions for each feature type
     """
     def __init__(self, n_layers: int, input_dims: dict, hidden_mlp_dims: dict, hidden_dims: dict,
-                 output_dims: dict, act_fn_in: nn.ReLU(), act_fn_out: nn.ReLU(), addition=True):
+                 output_dims: dict, act_fn_in: nn.ReLU(), act_fn_out: nn.ReLU(), addition=True, dropout: float=0.1,
+                 retrieval_k=0, augmented_graphfeature=False):
+        # TODO: dropout can NOT be specificed by users now, which is an critical hyper-parameter that deserves optimization later.
         super().__init__()
         self.n_layers = n_layers
         self.out_dim_X = output_dims['X']
@@ -233,15 +291,24 @@ class GraphTransformer(nn.Module):
         self.mlp_in_E = nn.Sequential(nn.Linear(input_dims['E'], hidden_mlp_dims['E']), act_fn_in,
                                       nn.Linear(hidden_mlp_dims['E'], hidden_dims['de']), act_fn_in)
 
-        self.mlp_in_y = nn.Sequential(nn.Linear(input_dims['y'], hidden_mlp_dims['y']), act_fn_in,
-                                      nn.Linear(hidden_mlp_dims['y'], hidden_dims['dy']), act_fn_in)
+        if augmented_graphfeature:
+            self.model_in_y = AugmentedGraphFeatureEncoder(raw_y_dim=input_dims['y'],
+                                                      y_hidden_mlp_dim=hidden_mlp_dims['y'],
+                                                      y_hidden_dim=hidden_dims['dy'],
+                                                      retrieval_k=retrieval_k,
+                                                      act_fn_in=act_fn_in,
+                                                      dropout=dropout,
+                                                      )
+        else:
+            self.model_in_y = nn.Sequential(nn.Linear(input_dims['y'], hidden_mlp_dims['y']), act_fn_in,
+                                       nn.Linear(hidden_mlp_dims['y'], hidden_dims['dy']), act_fn_in)   
 
         self.tf_layers = nn.ModuleList([XEyTransformerLayer(dx=hidden_dims['dx'],
                                                             de=hidden_dims['de'],
                                                             dy=hidden_dims['dy'],
                                                             n_head=hidden_dims['n_head'],
                                                             dim_ffX=hidden_dims['dim_ffX'],
-                                                            dim_ffE=hidden_dims['dim_ffE'])
+                                                            dim_ffE=hidden_dims['dim_ffE'],)
                                         for i in range(n_layers)])
 
         self.mlp_out_X = nn.Sequential(nn.Linear(hidden_dims['dx'], hidden_mlp_dims['X']), act_fn_out,
@@ -266,7 +333,7 @@ class GraphTransformer(nn.Module):
 
         new_E = self.mlp_in_E(E)
         new_E = (new_E + new_E.transpose(1, 2)) / 2
-        after_in = utils.PlaceHolder(X=self.mlp_in_X(X), E=new_E, y=self.mlp_in_y(y)).mask(node_mask)
+        after_in = utils.PlaceHolder(X=self.mlp_in_X(X), E=new_E, y=self.model_in_y(y)).mask(node_mask)
         X, E, y = after_in.X, after_in.E, after_in.y
 
         for layer in self.tf_layers:

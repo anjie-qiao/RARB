@@ -8,3 +8,21 @@ samples/
 /models/
 ckpt_classifier/
 X_output.csv/
+
+
+# Uni-rxn .gitignore setting
+# Ignore all .pkl files
+*.pkl
+
+# Except xxx.pkl, which we want to track
+!data/selfies_vocab.pkl
+!data/react_lib_smi.pkl
+
+# Ignore Python compiled files and directories
+__pycache__/
+*.py[cod]
+
+# Ignore checkpoint files
+*.ckpt
+
+*.pt

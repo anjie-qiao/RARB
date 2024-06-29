@@ -87,7 +87,6 @@ def to_dense(x, edge_index, edge_attr, batch, explicitly_encode_no_edge=True):
 
     return PlaceHolder(X=X, E=E), node_mask
 
-
 def encode_no_edge(E):
     assert len(E.shape) == 4
     if E.shape[-1] == 0:

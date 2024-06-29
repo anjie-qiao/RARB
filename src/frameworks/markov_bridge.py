@@ -15,6 +15,7 @@ from src.frameworks import diffusion_utils
 from src.metrics.train_metrics import TrainLossDiscrete, TrainLossVLB
 from src.metrics.sampling_metrics import compute_retrosynthesis_metrics
 from src.models.transformer_model import GraphTransformer
+from torch_geometric.utils import to_dense_adj, to_dense_batch, scatter
 
 
 from sklearn.metrics import roc_auc_score
@@ -55,9 +56,16 @@ class MarkovBridge(pl.LightningModule):
             number_chain_steps_to_save,
             fix_product_nodes=False,
             loss_type='cross_entropy',
+            retrieval_k=0,
+            encoded_reactants=None,
+            augmented_graphfeature=False,
     ):
 
         super().__init__()
+
+        self.retrieval_k = retrieval_k
+        self.encoded_reactants = encoded_reactants
+        #self.val_encoded_reactants = torch.load("data/uspto50k/raw/tencoded_react_tensor_val.pt")
 
         assert loss_type in ['cross_entropy', 'vlb']
 
@@ -103,7 +111,9 @@ class MarkovBridge(pl.LightningModule):
             hidden_dims=hidden_dims,
             output_dims=output_dims,
             act_fn_in=nn.ReLU(),
-            act_fn_out=nn.ReLU()
+            act_fn_out=nn.ReLU(),
+            retrieval_k=retrieval_k,
+            augmented_graphfeature=augmented_graphfeature,
         )
         self.noise_schedule = PredefinedNoiseScheduleDiscrete(
             noise_schedule=diffusion_noise_schedule,
@@ -153,9 +163,19 @@ class MarkovBridge(pl.LightningModule):
         product, p_node_mask = utils.to_dense(data.p_x, data.p_edge_index, data.p_edge_attr, data.batch)
         product = product.mask(p_node_mask)
 
-        context, c_node_mask = utils.to_dense(data.context_x, data.context_edge_index, data.context_edge_attr,
-                                              data.batch)
-        context = context.mask(c_node_mask)
+        #(bs,k)
+        if self.retrieval_k > 0:
+            retrieval_list = data.retrieval_list
+            # TODO: enable randomly picking k molecules from the top-d ones; their original rank might be useful as PE
+            # use original rank as PE but not randomly picking molecules
+            retrieval_index = retrieval_list[..., :self.retrieval_k]
+            #(bs,k,512)
+            retrieval_emb = self.encoded_reactants[retrieval_index]
+            #(bs,k,513) add rank as pe
+            rank_list =  torch.arange(1, self.retrieval_k+ 1).unsqueeze(0).unsqueeze(-1).repeat(retrieval_index.size(0), 1, 1).to(self.device)  
+            retrieval_emb = torch.cat([retrieval_emb,rank_list], dim=-1)
+            #(bs,k*513)
+            retrieval_emb = retrieval_emb.flatten(start_dim=1)
 
         assert torch.allclose(r_node_mask, p_node_mask)
         node_mask = r_node_mask
@@ -169,8 +189,9 @@ class MarkovBridge(pl.LightningModule):
         )
 
         # Computing extra features + context and making predictions
-        # context = product.clone() if self.use_context else None
+        context = product.clone() if self.use_context else None
         extra_data = self.compute_extra_data(noisy_data, context=context)
+        if self.retrieval_k > 0 : extra_data.y = torch.cat([extra_data.y,retrieval_emb], dim=1)
         pred = self.forward(noisy_data, extra_data, node_mask)
 
         # Masking unchanged part
@@ -458,10 +479,6 @@ class MarkovBridge(pl.LightningModule):
             sample_idx,
             save_true_reactants=True,
             use_one_hot=False,
-            product=None, 
-            context=None,
-            node_mask=None,
-
     ):
         """
         :param data
@@ -476,16 +493,13 @@ class MarkovBridge(pl.LightningModule):
         :return: molecule_list. Each element of this list is a tuple (atom_types, charges, positions)
         """
 
-        chain_X, chain_E, true_molecule_list, products_list, molecule_list, _, nll, ell, node_correct = self.sample_chain(
+        chain_X, chain_E, true_molecule_list, products_list, molecule_list, _, nll, ell = self.sample_chain(
             data=data,
             batch_size=batch_size,
             keep_chain=keep_chain,
             number_chain_steps_to_save=number_chain_steps_to_save,
             save_true_reactants=save_true_reactants,
             use_one_hot=use_one_hot,
-            product=product, 
-            context=context,
-            node_mask=node_mask,
         )
 
         if self.visualization_tools is not None:
@@ -503,13 +517,18 @@ class MarkovBridge(pl.LightningModule):
         return molecule_list, true_molecule_list, products_list, [0] * len(molecule_list), nll, ell
     def sample_chain(
             self, data, batch_size, keep_chain, number_chain_steps_to_save, save_true_reactants, use_one_hot=False,
-            product=None, context=None,node_mask=None,
-
     ):
         
-        # Context product
-        # product, node_mask = utils.to_dense(data.p_x, data.p_edge_index, data.p_edge_attr, data.batch)
-        # product = product.mask(node_mask)
+        #Context product
+        product, node_mask = utils.to_dense(data.p_x, data.p_edge_index, data.p_edge_attr, data.batch)
+        product = product.mask(node_mask)
+
+        retrieval_list = data.retrieval_list
+        retrieval_index = retrieval_list[..., :self.retrieval_k]
+        #(bs,k,512)
+        retrieval_emb = self.encoded_reactants[retrieval_index]  
+        #(bs,k*512)
+        retrieval_emb = retrieval_emb.flatten(start_dim=1)
 
         # context, c_node_mask = utils.to_dense(data.context_x, data.context_edge_index, data.context_edge_attr,
         #                                       data.batch)
@@ -568,7 +587,7 @@ class MarkovBridge(pl.LightningModule):
         # context.E = torch.cat([context.E, edge_labels], dim = -1)  
         # context = context.mask(node_mask)      
         
-        # context = product.clone() if self.use_context else None
+        context = product.clone() if self.use_context else None
 
         # Masks for fixed and modifiable nodes
         fixed_nodes = (product.X[..., -1] == 0).unsqueeze(-1)
@@ -611,6 +630,7 @@ class MarkovBridge(pl.LightningModule):
                 node_mask=node_mask,
                 context=context,
                 use_one_hot=use_one_hot,
+                retrieval_emb=retrieval_emb,
             )
 
             # Masking unchanged part
@@ -662,7 +682,6 @@ class MarkovBridge(pl.LightningModule):
             chain_X, chain_E, true_molecule_list, products_list, molecule_list, pred,
             nll.detach().cpu().numpy().tolist(),
             ell.detach().cpu().numpy().tolist(),
-            node_correct,
         )
 
     def visualize(
@@ -716,7 +735,7 @@ class MarkovBridge(pl.LightningModule):
             suffix=f'_{sample_idx}'
         )
 
-    def sample_p_zs_given_zt(self, s, t, X_t, E_t, y_t, X_T, E_T, y_T, node_mask, context=None, use_one_hot=False,):
+    def sample_p_zs_given_zt(self, s, t, X_t, E_t, y_t, X_T, E_T, y_T, node_mask, context=None, use_one_hot=False, retrieval_emb=None):
         # Hack: in direct MB we consider flipped time flow
         bs, n = X_t.shape[:2]
         t = 1 - t
@@ -725,6 +744,7 @@ class MarkovBridge(pl.LightningModule):
         # Neural net predictions
         noisy_data = {'X_t': X_t, 'E_t': E_t, 'y_t': y_t, 't': t, 'node_mask': node_mask}
         extra_data = self.compute_extra_data(noisy_data, context=context)
+        extra_data.y = torch.cat([extra_data.y,retrieval_emb], dim=1)
         pred = self.forward(noisy_data, extra_data, node_mask)
 
         # Normalize predictions
@@ -855,6 +875,28 @@ class MarkovBridge(pl.LightningModule):
             z_T = utils.PlaceHolder(X_T_i, E_T_i)
             _, prob_E_i = self.compute_q_zs_given_q_zt(z_t, z_T, node_mask, t)  # bs, n, n, d
             prob_E += prob_E_i * p_E_T[..., i].unsqueeze(-1)  # bs, n, n, d
+
+        assert ((prob_X.sum(dim=-1) - 1).abs() < 1e-4).all()
+        assert ((prob_E.sum(dim=-1) - 1).abs() < 1e-4).all()
+
+        return prob_X, prob_E
+
+    def my_compute_p_zs_given_p_zt(self, z_t, pred, node_mask, t):
+
+        prob_X = torch.zeros_like(p_X_T)  # bs, n, d
+        prob_E = torch.zeros_like(p_E_T)  # bs, n, n, d
+
+        # TODO: allow customizable #iterations
+        for i in range(4):
+            # TODO: tau decays from 10.0 to 0.1
+            p_X_T = F.gumbel_softmax(pred.X, tau=1.0, hard=True)
+            p_E_T = F.gumbel_softmax(pred.X, tau=1.0, hard=True)
+
+            z_T = utils.PlaceHolder(p_X_T, p_E_T)
+            prob_X_i, prob_E_i = self.compute_q_zs_given_q_zt(z_t, z_T, node_mask, t)  # bs, n, d and bs, n, n, d
+
+            prob_X += (1 / 4) * prob_X_i # bs, n, d
+            prob_E += (1 / 4) * prob_E_i # bs, n, n, d
 
         assert ((prob_X.sum(dim=-1) - 1).abs() < 1e-4).all()
         assert ((prob_E.sum(dim=-1) - 1).abs() < 1e-4).all()
