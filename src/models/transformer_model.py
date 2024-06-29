@@ -15,18 +15,21 @@ from src.models.layers import Xtoy, Etoy, masked_softmax
 
 class AugmentedGraphFeatureEncoder(nn.Module):
 
-    def __init__(self, raw_y_dim, y_hidden_mlp_dim, y_hidden_dim, retrieval_k, act_fn_in: nn.ReLU(), graph_emb_dim: int=512, dropout: float = 0.1):
+    def __init__(self, raw_y_dim, y_hidden_mlp_dim, y_hidden_dim, retrieval_k, act_fn_in: nn.ReLU(), graph_emb_dim: int=512, dropout: float = 0.1,
+                 kdim : int=512, vdim: int=512, num_heads: int=8):
 
         super(AugmentedGraphFeatureEncoder, self).__init__()
     
         self.raw_y_dim = raw_y_dim
+        self.retrieval_k =retrieval_k
         self.y_mlp = nn.Sequential(nn.Linear(raw_y_dim, y_hidden_mlp_dim), act_fn_in,
                                    nn.Linear(y_hidden_mlp_dim, y_hidden_dim))
 
         self.graph_emb_dim = graph_emb_dim
         self.dropout0 = nn.Dropout(dropout)
         # TODO: allow to specify num_head, kdim, and vdim
-        self.attn_layer = nn.MultiheadAttention(graph_emb_dim, num_heads=8, dropout=dropout, batch_first=True)
+        self.attn_layer = nn.MultiheadAttention(graph_emb_dim, num_heads=num_heads, kdim=kdim, vdim=vdim, dropout=dropout, batch_first=True)
+        self.PE_layer = torch.nn.Linear(1, graph_emb_dim)
         self.dropout1 = nn.Dropout(dropout)
         self.norm1 = LayerNorm(graph_emb_dim)
         # TODO: 512 --> 128 --> 512? Does it work?
@@ -44,11 +47,15 @@ class AugmentedGraphFeatureEncoder(nn.Module):
 
         # assume the graph embedding is 512-dim
         # TODO: add PE to it?
-        aug_graph_tokens = torch.reshape(y[:,self.raw_y_dim:], [y.size(0), -1, self.graph_emb_dim])
-        aug_graph_tokens = self.dropout0(aug_graph_tokens)
+        # add a simply learnable linear layer as position embedding
+        reshape_emb = torch.reshape(y[:,self.raw_y_dim:], [y.size(0), -1, self.graph_emb_dim + 1])
+        ranks = reshape_emb[..., -1].unsqueeze(-1)# bs, k, 1
+        aug_graph_tokens = reshape_emb[..., :self.graph_emb_dim] # bs, k ,512
+        rank_PE = self.PE_layer(ranks) # bs, k ,512
+        aug_graph_tokens = self.dropout0(aug_graph_tokens + rank_PE)
 
-        attn_graph_part = self.attn_layer(aug_graph_tokens, aug_graph_tokens, aug_graph_tokens, need_weights=False)
-        attn_graph_part = self.dropout1(attn_graph_part)
+        attn_graph_part= self.attn_layer(aug_graph_tokens, aug_graph_tokens, aug_graph_tokens, need_weights=False)
+        attn_graph_part = self.dropout1(attn_graph_part[0]) #in our torch version, nn.MultiheadAttention return a tuple
         attn_graph_part_inter = self.norm1(aug_graph_tokens + attn_graph_part)
         attn_graph_part = self.attn_ffn(attn_graph_part_inter)
         attn_graph_part = self.dropout2(attn_graph_part)
@@ -268,8 +275,8 @@ class GraphTransformer(nn.Module):
     dims : dict -- contains dimensions for each feature type
     """
     def __init__(self, n_layers: int, input_dims: dict, hidden_mlp_dims: dict, hidden_dims: dict,
-                 output_dims: dict, act_fn_in: nn.ReLU(), act_fn_out: nn.ReLU(), addition=True, retrieval_k=0, 
-                 augmented_graphfeature=False):
+                 output_dims: dict, act_fn_in: nn.ReLU(), act_fn_out: nn.ReLU(), addition=True, dropout: float=0.1,
+                 retrieval_k=0, augmented_graphfeature=False):
         # TODO: dropout can NOT be specificed by users now, which is an critical hyper-parameter that deserves optimization later.
         super().__init__()
         self.n_layers = n_layers
@@ -289,7 +296,8 @@ class GraphTransformer(nn.Module):
                                                       y_hidden_mlp_dim=hidden_mlp_dims['y'],
                                                       y_hidden_dim=hidden_dims['dy'],
                                                       retrieval_k=retrieval_k,
-                                                      act_fn_in=act_fn_in
+                                                      act_fn_in=act_fn_in,
+                                                      dropout=dropout,
                                                       )
         else:
             self.model_in_y = nn.Sequential(nn.Linear(input_dims['y'], hidden_mlp_dims['y']), act_fn_in,

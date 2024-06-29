@@ -44,6 +44,7 @@ retrieval_k: 3
 embedding: rxn
 augmented_graphfeature: True
 retrieval_dataset: 50k # 50k or application
+dropout: 0.1
 
 # Training
 n_epochs: 1000

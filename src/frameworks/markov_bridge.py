@@ -167,10 +167,14 @@ class MarkovBridge(pl.LightningModule):
         if self.retrieval_k > 0:
             retrieval_list = data.retrieval_list
             # TODO: enable randomly picking k molecules from the top-d ones; their original rank might be useful as PE
+            # use original rank as PE but not randomly picking molecules
             retrieval_index = retrieval_list[..., :self.retrieval_k]
             #(bs,k,512)
             retrieval_emb = self.encoded_reactants[retrieval_index]
-            #(bs,k*512)
+            #(bs,k,513) add rank as pe
+            rank_list =  torch.arange(1, self.retrieval_k+ 1).unsqueeze(0).unsqueeze(-1).repeat(retrieval_index.size(0), 1, 1).to(self.device)  
+            retrieval_emb = torch.cat([retrieval_emb,rank_list], dim=-1)
+            #(bs,k*513)
             retrieval_emb = retrieval_emb.flatten(start_dim=1)
 
         assert torch.allclose(r_node_mask, p_node_mask)

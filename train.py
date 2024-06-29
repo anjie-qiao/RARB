@@ -87,11 +87,12 @@ def main(args):
     sampling_metrics = SamplingMolecularMetrics(dataset_infos, datamodule.train_smiles)
     visualization_tools = MolecularVisualization(dataset_infos)
     
-    #(40008,512)
     if args.retrieval_dataset == "50k":
+        #(40008,512)
         encoded_reactants = torch.load("data/uspto50k/raw/rxn_encoded_react_tensor.pt")
     elif args.retrieval_dataset == "application":
-        encoded_reactants = torch.load("data/uspto50k/raw/rxn_encoded_reac_uspto_full.pt")
+        #(969283,512) sparse matrix storage
+        encoded_reactants = torch.load("data/uspto50k/raw/rxn_encoded_reac_uspto_full_sparse.pt")
     else: encoded_reactants = None
 
     if args.model == 'RetroBridge':
