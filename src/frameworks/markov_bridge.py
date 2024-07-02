@@ -65,6 +65,7 @@ class MarkovBridge(pl.LightningModule):
 
         self.retrieval_k = retrieval_k
         self.encoded_reactants = encoded_reactants
+        self.augmented_graphfeature = augmented_graphfeature
         #self.val_encoded_reactants = torch.load("data/uspto50k/raw/tencoded_react_tensor_val.pt")
 
         assert loss_type in ['cross_entropy', 'vlb']
@@ -172,8 +173,9 @@ class MarkovBridge(pl.LightningModule):
             #(bs,k,512)
             retrieval_emb = self.encoded_reactants[retrieval_index]
             #(bs,k,513) add rank as pe
-            rank_list =  torch.arange(1, self.retrieval_k+ 1).unsqueeze(0).unsqueeze(-1).repeat(retrieval_index.size(0), 1, 1).to(self.device)  
-            retrieval_emb = torch.cat([retrieval_emb,rank_list], dim=-1)
+            if self.augmented_graphfeature:
+                rank_list =  torch.arange(1, self.retrieval_k+ 1).unsqueeze(0).unsqueeze(-1).repeat(retrieval_index.size(0), 1, 1).to(self.device)  
+                retrieval_emb = torch.cat([retrieval_emb,rank_list], dim=-1)
             #(bs,k*513)
             retrieval_emb = retrieval_emb.flatten(start_dim=1)
 
@@ -523,12 +525,20 @@ class MarkovBridge(pl.LightningModule):
         product, node_mask = utils.to_dense(data.p_x, data.p_edge_index, data.p_edge_attr, data.batch)
         product = product.mask(node_mask)
 
-        retrieval_list = data.retrieval_list
-        retrieval_index = retrieval_list[..., :self.retrieval_k]
-        #(bs,k,512)
-        retrieval_emb = self.encoded_reactants[retrieval_index]  
-        #(bs,k*512)
-        retrieval_emb = retrieval_emb.flatten(start_dim=1)
+        #(bs,k)
+        if self.retrieval_k > 0:
+            retrieval_list = data.retrieval_list
+            # TODO: enable randomly picking k molecules from the top-d ones; their original rank might be useful as PE
+            # use original rank as PE but not randomly picking molecules
+            retrieval_index = retrieval_list[..., :self.retrieval_k]
+            #(bs,k,512)
+            retrieval_emb = self.encoded_reactants[retrieval_index]
+            #(bs,k,513) add rank as pe
+            if self.augmented_graphfeature:
+                rank_list =  torch.arange(1, self.retrieval_k+ 1).unsqueeze(0).unsqueeze(-1).repeat(retrieval_index.size(0), 1, 1).to(self.device)  
+                retrieval_emb = torch.cat([retrieval_emb,rank_list], dim=-1)
+            #(bs,k*513)
+            retrieval_emb = retrieval_emb.flatten(start_dim=1)
 
         # context, c_node_mask = utils.to_dense(data.context_x, data.context_edge_index, data.context_edge_attr,
         #                                       data.batch)
