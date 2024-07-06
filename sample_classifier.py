@@ -1,29 +1,34 @@
 import argparse
 import os
+from time import time
 import pandas as pd
+import torch
 
 from src.utils import disable_rdkit_logging, parse_yaml_config, set_deterministic
+
+from src.data import utils
 from src.analysis.rdkit_functions import build_molecule
 from src.frameworks.discrete_diffusion import DiscreteDiffusion
-from src.frameworks.markov_bridge import MarkovBridge
+from src.frameworks.markov_bridge import MarkovBridge  
 from src.frameworks.one_shot_model import OneShotModel
-from src.data.retrieval_dataset import RetroBridgeDataModule, RetroBridgeDatasetInfos
+from src.data.retrobridge_dataset import RetroBridgeDataModule, RetroBridgeDatasetInfos
+
+from src.frameworks.rerto_classifier import RertoClassifier
 
 from rdkit import Chem
 from tqdm import tqdm
-import torch
-from src.data import utils
+import time
 
 from pdb import set_trace
 
-
 def main(args):
-    torch_device = 'cuda:0' if args.device == 'gpu' else 'cpu'
+    torch_device = 'cuda' if args.device == 'gpu' else 'cpu'
     data_root = os.path.join(args.data, args.dataset)
-    checkpoint_name = args.checkpoint.split('/')[-1].replace('.ckpt', '')
+    checkpoint_name = args.checkpoint_decoder.split('/')[-1].replace('.ckpt', '')
 
     output_dir = os.path.join(args.samples, f'{args.dataset}_{args.mode}')
-    table_name = f'{checkpoint_name}_{args.retrieval_k}_{args.retrieval_dataset}_T={args.n_steps}_n={args.n_samples}_seed={args.sampling_seed}.csv'
+
+    table_name = f'{checkpoint_name}_T={args.n_steps}_n={args.n_samples}_seed30%flipnode+trueE={args.sampling_seed}.csv'
     table_path = os.path.join(output_dir, table_name)
 
     skip_first_n = 0
@@ -39,18 +44,17 @@ def main(args):
     print(f'Samples will be saved to {table_path}')
 
     # Loading model form checkpoint (all hparams will be automatically set)
-    if args.model == 'DiGress':
-        model_class = DiscreteDiffusion
-    elif args.model == 'OneShot':
-        model_class = OneShotModel
-    elif args.model == 'RetroBridge':
-        model_class = MarkovBridge
-    else:
-        raise NotImplementedError(args.model)
+    decoder_model = MarkovBridge
+    classifier_model = RertoClassifier
+    
+    print('Model class:', decoder_model)
 
-    print('Model class:', model_class)
+    classifier_model = classifier_model.load_from_checkpoint(args.checkpoint_classifier, map_location=torch_device)
+    classifier_model.eval().to(torch_device)
+    classifier_model.visualization_tools = None
 
-    model = model_class.load_from_checkpoint(args.checkpoint, map_location=torch_device)
+    decoder_model = decoder_model.load_from_checkpoint(args.checkpoint_decoder, map_location=torch_device)
+    
     datamodule = RetroBridgeDataModule(
         data_root=data_root,
         batch_size=args.batch_size,
@@ -59,16 +63,14 @@ def main(args):
         extra_nodes=args.extra_nodes,
         evaluation=False,
         swap=args.swap,
-        retrieval_dataset=args.retrieval_dataset,
-        augmented_graphfeature=args.augmented_graphfeature,
     )
     dataset_infos = RetroBridgeDatasetInfos(datamodule)
 
     set_deterministic(args.sampling_seed)
-    model.eval().to(torch_device)
-
-    model.visualization_tools = None
-    model.T = args.n_steps
+    decoder_model.eval().to(torch_device)
+    decoder_model.visualization_tools = None
+    decoder_model.T = args.n_steps
+  
     group_size = args.n_samples
 
     ident = 0
@@ -80,17 +82,13 @@ def main(args):
     sampled_atom_nums = []
     computed_nlls = []
     computed_ells = []
+    computed_nc = []
 
     dataloader = datamodule.test_dataloader() if args.mode == 'test' else datamodule.val_dataloader()
-    if args.retrieval_dataset == "50k":
-        tensor1 = torch.load("data/uspto50k/raw/rxn_encoded_react_tensor.pt")
-        tensor2 = torch.load("data/uspto50k/raw/rxn_encoded_react_tensor_val.pt")
-        encoded_reactants = torch.cat((tensor1,tensor2), dim=0)
-    elif args.retrieval_dataset == "application":
-        encoded_reactants = torch.load("data/uspto50k/raw/rxn_encoded_reac_uspto_full.pt")
-    else: encoded_reactants = None
 
     for i, data in enumerate(tqdm(dataloader)):
+        data = data.to(torch_device)
+
         if i * args.batch_size < skip_first_n:
             continue
 
@@ -99,68 +97,87 @@ def main(args):
         batch_scores = []
         batch_nll = []
         batch_ell = []
+        batch_node_label = []
 
         ground_truth = []
         input_products = []
+
+        product, node_mask = utils.to_dense(data.p_x, data.p_edge_index, data.p_edge_attr, data.batch)
+        product = product.mask(node_mask)
+        context, c_node_mask = utils.to_dense(data.context_x, data.context_edge_index, data.context_edge_attr, data.batch)
+        context = context.mask(c_node_mask)
+        #(bs, n, 1)
+        px_label = context.X[:,:,-1].unsqueeze(-1).clone()
+        #(bs, n, n, 1)
+        pe_label = context.E[:,:,:,-1].unsqueeze(-1)
+        #(ba,n)
+        dummy_node_mask = product.X[...,-1] != 1
+        new_node_mask = node_mask & dummy_node_mask 
+
+
+        #(bs,n,n)
+        edge_mask = (product.E[...,0] != 1) & (torch.sum(product.E, dim=-1) != 0)  
+
+        product_data = {'X_t': product.X, 'E_t': product.E, 'y_t': product.y, 't': None, 'node_mask': node_mask}
+        product_extra_data = decoder_model.compute_extra_data(product_data, context=None, condition_on_t=False)
+        pred_label = classifier_model.forward(product, product_extra_data, node_mask, edge_mask, new_node_mask)
+
+        #(bs,n,)
+        node_predicted_labels = torch.argmax(pred_label['X'], dim=-1)   
+        #(bs,n,n)
+        edge_predicted_labels = torch.argmax(pred_label['E'], dim=-1)
+        #(bs,n,)
+        node_predicted_labels[~new_node_mask] = 0
+        #(bs,n,n,)
+        edge_predicted_labels[~edge_mask] = 0
+        
+        # mark the correct graph 
+        #(bs)
+        node_correct = torch.all(node_predicted_labels == context.X[...,-1], dim=1)
+
+        # randomly filp the ground truth node labels of graph with incorrect prediction 
+        # (nocorN,n,1)  
+        not_all_correct = px_label[~node_correct]
+        nac_mask = torch.rand(not_all_correct.shape) < 0.28 #randomly select 28% of nodes to filp
+        not_all_correct[nac_mask] = 1 - not_all_correct[nac_mask]
+        px_label[~node_correct] = not_all_correct
+
+        #debug
+        px_label_com = torch.all(px_label.squeeze(-1) == context.X[...,-1], dim=1)
+        print("new node accuracy: ",px_label_com.float().mean().item())
+
+        #create context and add labels
+        context = product.clone()
+        context.X = torch.cat([context.X, px_label], dim = -1)
+        context.E = torch.cat([context.E, pe_label], dim = -1)  
+        context = context.mask(node_mask)   
+
         for sample_idx in range(group_size):
-            data = data.to(torch_device)
 
-            #Context product
-            product, node_mask = utils.to_dense(data.p_x, data.p_edge_index, data.p_edge_attr, data.batch)
-            product = product.mask(node_mask)
-            context = product.clone() if args.use_context else None
-            #(bs,k)
-            if args.retrieval_k > 0:
-                retrieval_list = data.retrieval_list
-                retrieval_index = retrieval_list[..., :args.retrieval_k]
-                #(bs,k,512)
-                retrieval_emb = encoded_reactants[retrieval_index]
-                #(bs,k,513) add rank as pe
-                if args.augmented_graphfeature:
-                    rank_list =  torch.arange(1, args.retrieval_k+ 1).unsqueeze(0).unsqueeze(-1).repeat(retrieval_index.size(0), 1, 1).to(torch_device)  
-                    retrieval_emb = torch.cat([retrieval_emb,rank_list], dim=-1)
-                #(bs,k*513)
-                retrieval_emb = retrieval_emb.flatten(start_dim=1)
+            pred_molecule_list, true_molecule_list, products_list, scores, nlls, ells = decoder_model.sample_batch(
+                data=data,
+                batch_id=ident,
+                batch_size=bs,
+                save_final=0,
+                keep_chain=0,
+                number_chain_steps_to_save=1,
+                sample_idx=sample_idx,
+                save_true_reactants=True,
+                use_one_hot=args.use_one_hot,
 
-            if args.model == 'OneShot':
-                pred_molecule_list, true_molecule_list, products_list, scores, nlls, ells = model.sample_batch(
-                    data=data,
-                    batch_id=ident,
-                    batch_size=bs,
-                    save_final=0,
-                    sample_idx=sample_idx,
-                )
-            elif args.model == 'DiGress':
-                pred_molecule_list, true_molecule_list, products_list, scores, nlls, ells = model.sample_batch(
-                    data=data,
-                    batch_id=ident,
-                    batch_size=bs,
-                    save_final=0,
-                    keep_chain=0,
-                    number_chain_steps_to_save=1,
-                    sample_idx=sample_idx,
-                )
-            else:
-                pred_molecule_list, true_molecule_list, products_list, scores, nlls, ells = model.sample_batch(
-                    data=data,
-                    batch_id=ident,
-                    batch_size=bs,
-                    save_final=0,
-                    keep_chain=0,
-                    number_chain_steps_to_save=1,
-                    sample_idx=sample_idx,
-                    save_true_reactants=True,
-                    use_one_hot=args.use_one_hot,
-                    product = product,
-                    context = context,
-                    retrieval_emb= retrieval_emb,
-                    node_mask=node_mask,
-                )
+                product=product, 
+                context=context,
+                node_mask=node_mask,
+
+
+            )
 
             batch_groups.append(pred_molecule_list)
             batch_scores.append(scores)
             batch_nll.append(nlls)
             batch_ell.append(ells)
+
+            batch_node_label.append(node_correct.int().cpu().numpy())
 
             if sample_idx == 0:
                 ground_truth.extend(true_molecule_list)
@@ -171,41 +188,47 @@ def main(args):
         grouped_scores = []
         grouped_nlls = []
         grouped_ells = []
+        grouped_node_label = []
         for mol_idx_in_batch in range(bs):
             mol_samples_group = []
             mol_scores_group = []
             nlls_group = []
             ells_group = []
+            node_label_group = []
 
-            for batch_group, scores_group, nll_gr, ell_gr in zip(batch_groups, batch_scores, batch_nll, batch_ell):
+            for batch_group, scores_group, nll_gr, ell_gr, nc_gr in zip(batch_groups, batch_scores, batch_nll, batch_ell, batch_node_label):
                 mol_samples_group.append(batch_group[mol_idx_in_batch])
                 mol_scores_group.append(scores_group[mol_idx_in_batch])
                 nlls_group.append(nll_gr[mol_idx_in_batch])
                 ells_group.append(ell_gr[mol_idx_in_batch])
+                node_label_group.append(nc_gr[mol_idx_in_batch])
 
             assert len(mol_samples_group) == group_size
             grouped_samples.append(mol_samples_group)
             grouped_scores.append(mol_scores_group)
             grouped_nlls.append(nlls_group)
             grouped_ells.append(ells_group)
+            grouped_node_label.append(node_label_group)
 
         # Writing smiles
-        for true_mol, product_mol, pred_mols, pred_scores, nlls, ells in zip(
-                ground_truth, input_products, grouped_samples, grouped_scores, grouped_nlls, grouped_ells,
+        for true_mol, product_mol, pred_mols, pred_scores, nlls, ells, node_corrects in zip(
+
+                ground_truth, input_products, grouped_samples, grouped_scores, grouped_nlls, grouped_ells, grouped_node_label
+
         ):
             true_mol, true_n_dummy_atoms = build_molecule(
                 true_mol[0], true_mol[1], dataset_infos.atom_decoder, return_n_dummy_atoms=True
             )
-            true_smi = Chem.MolToSmiles(true_mol)
+            true_smi = Chem.MolToSmiles(true_mol) # type: ignore
 
             product_mol = build_molecule(product_mol[0], product_mol[1], dataset_infos.atom_decoder)
-            product_smi = Chem.MolToSmiles(product_mol)
+            product_smi = Chem.MolToSmiles(product_mol) # type: ignore
 
-            for pred_mol, pred_score, nll, ell in zip(pred_mols, pred_scores, nlls, ells):
+            for pred_mol, pred_score, nll, ell, node_correct in zip(pred_mols, pred_scores, nlls, ells, node_corrects):
                 pred_mol, n_dummy_atoms = build_molecule(
                     pred_mol[0], pred_mol[1], dataset_infos.atom_decoder, return_n_dummy_atoms=True
                 )
-                pred_smi = Chem.MolToSmiles(pred_mol)
+                pred_smi = Chem.MolToSmiles(pred_mol) # type: ignore
                 true_molecules_smiles.append(true_smi)
                 product_molecules_smiles.append(product_smi)
                 pred_molecules_smiles.append(pred_smi)
@@ -214,7 +237,8 @@ def main(args):
                 sampled_atom_nums.append(RetroBridgeDatasetInfos.max_n_dummy_nodes - n_dummy_atoms)
                 computed_nlls.append(nll)
                 computed_ells.append(ell)
-
+                computed_nc.append(node_correct)
+  
         table = pd.DataFrame({
             'product': product_molecules_smiles,
             'pred': pred_molecules_smiles,
@@ -224,7 +248,8 @@ def main(args):
             'sampled_n_dummy_nodes': sampled_atom_nums,
             'nll': computed_nlls,
             'ell': computed_ells,
-        })
+            'nc_label':computed_nc,
+        }) 
         full_table = pd.concat([prev_table, table])
         full_table.to_csv(table_path, index=False)
 
@@ -233,7 +258,8 @@ if __name__ == '__main__':
     disable_rdkit_logging()
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=argparse.FileType(mode='r'), required=True)
-    parser.add_argument('--checkpoint', action='store', type=str, required=True)
+    parser.add_argument('--checkpoint_decoder', action='store', type=str, required=True)
+    parser.add_argument('--checkpoint_classifier', action='store', type=str, required=True)
     parser.add_argument('--samples', action='store', type=str, required=True)
     parser.add_argument('--model', action='store', type=str, required=True)
     parser.add_argument('--mode', action='store', type=str, required=True)

@@ -357,6 +357,26 @@ class MarkovBridge(pl.LightningModule):
                 break
 
             data = data.to(self.device)
+
+            #Context product
+            product, node_mask = utils.to_dense(data.p_x, data.p_edge_index, data.p_edge_attr, data.batch)
+            product = product.mask(node_mask)
+            context = product.clone() if self.use_context else None
+            #(bs,k)
+            if self.retrieval_k > 0:
+                retrieval_list = data.retrieval_list
+                # TODO: enable randomly picking k molecules from the top-d ones; their original rank might be useful as PE
+                # use original rank as PE but not randomly picking molecules
+                retrieval_index = retrieval_list[..., :self.retrieval_k]
+                #(bs,k,512)
+                retrieval_emb = self.encoded_reactants[retrieval_index]
+                #(bs,k,513) add rank as pe
+                if self.augmented_graphfeature:
+                    rank_list =  torch.arange(1, self.retrieval_k+ 1).unsqueeze(0).unsqueeze(-1).repeat(retrieval_index.size(0), 1, 1).to(self.device)  
+                    retrieval_emb = torch.cat([retrieval_emb,rank_list], dim=-1)
+                #(bs,k*513)
+                retrieval_emb = retrieval_emb.flatten(start_dim=1)
+                
             bs = len(data.batch.unique())
             to_generate = bs
             to_save = min(samples_left_to_save, bs)
@@ -372,6 +392,10 @@ class MarkovBridge(pl.LightningModule):
                     keep_chain=chains_save,
                     number_chain_steps_to_save=self.number_chain_steps_to_save,
                     sample_idx=sample_idx,
+                    product = product,
+                    context = context,
+                    retrieval_emb= retrieval_emb,
+                    node_mask=node_mask,
                 )
                 samples.extend(molecule_list)
                 batch_groups.append(molecule_list)
@@ -481,6 +505,10 @@ class MarkovBridge(pl.LightningModule):
             sample_idx,
             save_true_reactants=True,
             use_one_hot=False,
+            product = None,
+            context = None,
+            retrieval_emb= None,
+            node_mask=None,
     ):
         """
         :param data
@@ -502,6 +530,10 @@ class MarkovBridge(pl.LightningModule):
             number_chain_steps_to_save=number_chain_steps_to_save,
             save_true_reactants=save_true_reactants,
             use_one_hot=use_one_hot,
+            product = product,
+            context = context,
+            retrieval_emb= retrieval_emb,
+            node_mask=node_mask,
         )
 
         if self.visualization_tools is not None:
@@ -519,27 +551,9 @@ class MarkovBridge(pl.LightningModule):
         return molecule_list, true_molecule_list, products_list, [0] * len(molecule_list), nll, ell
     def sample_chain(
             self, data, batch_size, keep_chain, number_chain_steps_to_save, save_true_reactants, use_one_hot=False,
+            product = None,context = None,retrieval_emb= None,node_mask=None,
     ):
         
-        #Context product
-        product, node_mask = utils.to_dense(data.p_x, data.p_edge_index, data.p_edge_attr, data.batch)
-        product = product.mask(node_mask)
-
-        #(bs,k)
-        if self.retrieval_k > 0:
-            retrieval_list = data.retrieval_list
-            # TODO: enable randomly picking k molecules from the top-d ones; their original rank might be useful as PE
-            # use original rank as PE but not randomly picking molecules
-            retrieval_index = retrieval_list[..., :self.retrieval_k]
-            #(bs,k,512)
-            retrieval_emb = self.encoded_reactants[retrieval_index]
-            #(bs,k,513) add rank as pe
-            if self.augmented_graphfeature:
-                rank_list =  torch.arange(1, self.retrieval_k+ 1).unsqueeze(0).unsqueeze(-1).repeat(retrieval_index.size(0), 1, 1).to(self.device)  
-                retrieval_emb = torch.cat([retrieval_emb,rank_list], dim=-1)
-            #(bs,k*513)
-            retrieval_emb = retrieval_emb.flatten(start_dim=1)
-
         # context, c_node_mask = utils.to_dense(data.context_x, data.context_edge_index, data.context_edge_attr,
         #                                       data.batch)
         # context = context.mask(c_node_mask)
@@ -596,8 +610,6 @@ class MarkovBridge(pl.LightningModule):
         # context.X = torch.cat([context.X, restored_node_labels.unsqueeze(-1)], dim = -1)
         # context.E = torch.cat([context.E, edge_labels], dim = -1)  
         # context = context.mask(node_mask)      
-        
-        context = product.clone() if self.use_context else None
 
         # Masks for fixed and modifiable nodes
         fixed_nodes = (product.X[..., -1] == 0).unsqueeze(-1)
