@@ -7,7 +7,7 @@ from src.metrics.eval_csv_helpers import canonicalize, compute_confidence, assig
 
 csv_file = Path('./samples/uspto50k_test/epoch=579_top_5_accuracy=0.773_3_application_T=500_n=100_seed=1.csv')
 df = pd.read_csv(csv_file)
-df = df.iloc[:19200]
+#df = df.iloc[:25600]
 #df_unique = df.drop_duplicates(subset=['pred'])
 #print(len(df_unique))
 print(len(df)/100)

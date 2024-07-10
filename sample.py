@@ -82,13 +82,13 @@ def main(args):
     computed_ells = []
 
     dataloader = datamodule.test_dataloader() if args.mode == 'test' else datamodule.val_dataloader()
-    if args.retrieval_dataset == "50k":
-        tensor1 = torch.load("data/uspto50k/raw/rxn_encoded_react_tensor.pt")
-        tensor2 = torch.load("data/uspto50k/raw/rxn_encoded_react_tensor_val.pt")
-        encoded_reactants = torch.cat((tensor1,tensor2), dim=0)
-    elif args.retrieval_dataset == "application":
-        encoded_reactants = torch.load("data/uspto50k/raw/rxn_encoded_reac_uspto_full.pt")
-    else: encoded_reactants = None
+    # if args.retrieval_dataset == "50k":
+    #     tensor1 = torch.load("data/uspto50k/raw/rxn_encoded_react_tensor.pt")
+    #     tensor2 = torch.load("data/uspto50k/raw/rxn_encoded_react_tensor_val.pt")
+    #     encoded_reactants = torch.cat((tensor1,tensor2), dim=0)
+    # elif args.retrieval_dataset == "application":
+    #     encoded_reactants = torch.load("data/uspto50k/raw/rxn_encoded_reac_uspto_full.pt")
+    # else: encoded_reactants = None
 
     for i, data in enumerate(tqdm(dataloader)):
         if i * args.batch_size < skip_first_n:
@@ -104,24 +104,6 @@ def main(args):
         input_products = []
         for sample_idx in range(group_size):
             data = data.to(torch_device)
-
-            #Context product
-            product, node_mask = utils.to_dense(data.p_x, data.p_edge_index, data.p_edge_attr, data.batch)
-            product = product.mask(node_mask)
-            context = product.clone() if args.use_context else None
-            #(bs,k)
-            if args.retrieval_k > 0:
-                retrieval_list = data.retrieval_list
-                retrieval_index = retrieval_list[..., :args.retrieval_k]
-                #(bs,k,512)
-                retrieval_emb = encoded_reactants[retrieval_index]
-                #(bs,k,513) add rank as pe
-                if args.augmented_graphfeature:
-                    rank_list =  torch.arange(1, args.retrieval_k+ 1).unsqueeze(0).unsqueeze(-1).repeat(retrieval_index.size(0), 1, 1).to(torch_device)  
-                    retrieval_emb = torch.cat([retrieval_emb,rank_list], dim=-1)
-                #(bs,k*513)
-                retrieval_emb = retrieval_emb.flatten(start_dim=1)
-            else: retrieval_emb=None
 
             if args.model == 'OneShot':
                 pred_molecule_list, true_molecule_list, products_list, scores, nlls, ells = model.sample_batch(
@@ -152,10 +134,6 @@ def main(args):
                     sample_idx=sample_idx,
                     save_true_reactants=True,
                     use_one_hot=args.use_one_hot,
-                    product = product,
-                    context = context,
-                    retrieval_emb= retrieval_emb,
-                    node_mask=node_mask,
                 )
 
             batch_groups.append(pred_molecule_list)

@@ -297,7 +297,7 @@ class GraphTransformer(nn.Module):
                                                       y_hidden_dim=hidden_dims['dy'],
                                                       retrieval_k=retrieval_k,
                                                       act_fn_in=act_fn_in,
-                                                      dropout=dropout,
+                                                      #dropout=dropout,
                                                       )
         else:
             self.model_in_y = nn.Sequential(nn.Linear(input_dims['y'], hidden_mlp_dims['y']), act_fn_in,
