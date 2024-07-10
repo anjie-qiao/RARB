@@ -16,10 +16,11 @@ samples_per_input: 5
 chains_to_save: 5
 number_chain_steps_to_save: 50
 enable_progress_bar: True
+visualization: False
 
 # Data
 dataset: uspto50k
-batch_size: 64
+batch_size: 8
 num_workers: 6
 shuffle: True
 extra_nodes: True
@@ -44,7 +45,7 @@ retrieval_k: 3
 embedding: rxn
 augmented_graphfeature: True
 retrieval_dataset: application # 50k or application
-dropout: 0.1
+add_product: True
 
 # Training
 n_epochs: 1000

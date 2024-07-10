@@ -40,11 +40,12 @@ class RetroBridgeDataset(InMemoryDataset):
     }
 
     def __init__(self, stage, root, extra_nodes=False, swap=False, 
-                 retrieval_dataset=None, augmented_graphfeature=False):
+                 retrieval_dataset=None, augmented_graphfeature=False, add_product = False):
         self.stage = stage
         self.extra_nodes = extra_nodes
         self.retrieval_dataset = retrieval_dataset
         self.augmented_graphfeature = augmented_graphfeature
+        self.add_product = add_product
 
         if self.stage == 'train':
             self.file_idx = 0
@@ -88,16 +89,20 @@ class RetroBridgeDataset(InMemoryDataset):
     def raw_file_names(self):
         if self.retrieval_dataset == '50k':
             return ['uspto50k_train_unirxnfp.csv', 'uspto50k_val_unirxnfp.csv', 'uspto50k_test_unirxnfp.csv']
-        elif self.retrieval_dataset == 'application':
+        elif self.retrieval_dataset == 'application' and not self.add_product: 
             return ['uspto50k_train_application.csv', 'uspto50k_val_application.csv', 'uspto50k_test_application.csv']
+        elif self.retrieval_dataset == 'application' and self.add_product: 
+            return ['uspto50k_train_application_product.csv', 'uspto50k_val_application_product.csv', 'uspto50k_test_application_product.csv']
         else:
             return ['uspto50k_train.csv', 'uspto50k_val.csv', 'uspto50k_test.csv']
     @property
     def split_file_name(self):
         if self.retrieval_dataset == '50k':
             return ['uspto50k_train_unirxnfp.csv', 'uspto50k_val_unirxnfp.csv', 'uspto50k_test_unirxnfp.csv']
-        elif self.retrieval_dataset == 'application':
+        elif self.retrieval_dataset == 'application' and not self.add_product: 
             return ['uspto50k_train_application.csv', 'uspto50k_val_application.csv', 'uspto50k_test_application.csv']
+        elif self.retrieval_dataset == 'application' and self.add_product: 
+            return ['uspto50k_train_application_product.csv', 'uspto50k_val_application_product.csv', 'uspto50k_test_application_product.csv']
         else:
             return ['uspto50k_train.csv', 'uspto50k_val.csv', 'uspto50k_test.csv']
 
@@ -110,8 +115,10 @@ class RetroBridgeDataset(InMemoryDataset):
     def processed_file_names(self):
         if self.retrieval_dataset == '50k':
             return [f'train_unirxn.pt', f'val_unirxn.pt', f'test_unirxn.pt']
-        elif self.retrieval_dataset == 'application':
+        elif self.retrieval_dataset == 'application' and not self.add_product:
             return [f'train_application.pt', f'val_application.pt', f'test_application.pt']
+        elif self.retrieval_dataset == 'application' and self.add_product:
+            return [f'train_application_product.pt', f'val_application_product.pt', f'test_application_product.pt']
         else:
             return [f'train.pt', f'val.pt', f'test.pt']
         
@@ -301,7 +308,7 @@ class RetroBridgeDataModule(MolecularDataModule):
     DATASET_CLASS = RetroBridgeDataset
 
     def __init__(self, data_root, batch_size, num_workers, shuffle, extra_nodes=False, evaluation=False, swap=False,
-                 retrieval_dataset=None, augmented_graphfeature=False):
+                 retrieval_dataset=None, augmented_graphfeature=False, add_product=False):
         super().__init__(batch_size, num_workers, shuffle)
         self.extra_nodes = extra_nodes
         self.evaluation = evaluation
@@ -310,14 +317,15 @@ class RetroBridgeDataModule(MolecularDataModule):
         self.train_smiles = []
         self.retrieval_dataset=retrieval_dataset
         self.augmented_graphfeature = augmented_graphfeature
+        self.add_product = add_product
         self.prepare_data() 
 
     def prepare_data(self) -> None:
         stage = 'val' if self.evaluation else 'train'
         datasets = {
-            'train': self.DATASET_CLASS(stage=stage, root=self.data_root, extra_nodes=self.extra_nodes, swap=self.swap,retrieval_dataset=self.retrieval_dataset, augmented_graphfeature=self.augmented_graphfeature),
-            'val': self.DATASET_CLASS(stage='val', root=self.data_root, extra_nodes=self.extra_nodes, swap=self.swap,retrieval_dataset=self.retrieval_dataset, augmented_graphfeature=self.augmented_graphfeature),
-            'test': self.DATASET_CLASS(stage='test', root=self.data_root, extra_nodes=self.extra_nodes, swap=self.swap,retrieval_dataset=self.retrieval_dataset, augmented_graphfeature=self.augmented_graphfeature),
+            'train': self.DATASET_CLASS(stage=stage, root=self.data_root, extra_nodes=self.extra_nodes, swap=self.swap,retrieval_dataset=self.retrieval_dataset, augmented_graphfeature=self.augmented_graphfeature,add_product = self.add_product),
+            'val': self.DATASET_CLASS(stage='val', root=self.data_root, extra_nodes=self.extra_nodes, swap=self.swap,retrieval_dataset=self.retrieval_dataset, augmented_graphfeature=self.augmented_graphfeature,add_product = self.add_product),
+            'test': self.DATASET_CLASS(stage='test', root=self.data_root, extra_nodes=self.extra_nodes, swap=self.swap,retrieval_dataset=self.retrieval_dataset, augmented_graphfeature=self.augmented_graphfeature,add_product = self.add_product),
         }
 
         self.dataloaders = {}

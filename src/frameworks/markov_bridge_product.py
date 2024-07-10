@@ -59,15 +59,20 @@ class MarkovBridge(pl.LightningModule):
             retrieval_k=0,
             encoded_reactants=None,
             augmented_graphfeature=False,
+            add_product=False,
     ):
 
         super().__init__()
 
         self.retrieval_k = retrieval_k
         self.encoded_reactants = encoded_reactants
-        #self.val_encoded_reactants = torch.load("data/uspto50k/raw/tencoded_react_tensor_val.pt")
+        self.augmented_graphfeature = augmented_graphfeature
+        self.add_product =add_product
+        if add_product: 
+            self.train_encoded_product = torch.load("data/uspto50k/raw/rxn_encoded_prod_uspto50k_train.pt")
+            self.val_encoded_product = torch.load("data/uspto50k/raw/rxn_encoded_prod_uspto50k_val.pt")
 
-        assert loss_type in ['cross_entropy', 'vlb', 'myvlb']
+        assert loss_type in ['cross_entropy', 'vlb']
 
         input_dims = dataset_infos.input_dims
         output_dims = dataset_infos.output_dims
@@ -95,8 +100,8 @@ class MarkovBridge(pl.LightningModule):
 
         self.dataset_info = dataset_infos
         self.train_metrics = train_metrics
-        self.train_loss = TrainLossDiscrete(lambda_train) if loss_type != 'vlb' and loss_type!='myvlb'  else TrainLossVLB(lambda_train)
-        self.val_loss = TrainLossDiscrete(lambda_train) if loss_type != 'vlb' and loss_type!='myvlb' else TrainLossVLB(lambda_train)
+        self.train_loss = TrainLossDiscrete(lambda_train) if loss_type != 'vlb' else TrainLossVLB(lambda_train)
+        self.val_loss = TrainLossDiscrete(lambda_train) if loss_type != 'vlb' else TrainLossVLB(lambda_train)
         self.sampling_metrics = sampling_metrics
 
         self.visualization_tools = visualization_tools
@@ -112,7 +117,7 @@ class MarkovBridge(pl.LightningModule):
             output_dims=output_dims,
             act_fn_in=nn.ReLU(),
             act_fn_out=nn.ReLU(),
-            retrieval_k=retrieval_k,
+            retrieval_k= retrieval_k+1 if add_product else retrieval_k,
             augmented_graphfeature=augmented_graphfeature,
         )
         self.noise_schedule = PredefinedNoiseScheduleDiscrete(
@@ -168,12 +173,25 @@ class MarkovBridge(pl.LightningModule):
             retrieval_list = data.retrieval_list
             # TODO: enable randomly picking k molecules from the top-d ones; their original rank might be useful as PE
             # use original rank as PE but not randomly picking molecules
-            retrieval_index = retrieval_list[..., :self.retrieval_k]
-            #(bs,k,512)
-            retrieval_emb = self.encoded_reactants[retrieval_index]
-            #(bs,k,513) add rank as pe
-            rank_list =  torch.arange(1, self.retrieval_k+ 1).unsqueeze(0).unsqueeze(-1).repeat(retrieval_index.size(0), 1, 1).to(self.device)  
-            retrieval_emb = torch.cat([retrieval_emb,rank_list], dim=-1)
+            if self.add_product:   
+                product_index = retrieval_list[..., :1] 
+                retrieval_index = retrieval_list[..., 1:self.retrieval_k+1] 
+                #(bs,k,512)
+                retrieval_emb = self.encoded_reactants[retrieval_index]
+                product_emb = self.train_encoded_product[product_index]
+                retrieval_emb = torch.cat([product_emb,retrieval_emb],dim=1)
+                #(bs,k,513) add rank as pe
+                if self.augmented_graphfeature:
+                    rank_list =  torch.arange(1, self.retrieval_k+ 2).unsqueeze(0).unsqueeze(-1).repeat(retrieval_index.size(0), 1, 1).to(self.device)  
+                    retrieval_emb = torch.cat([retrieval_emb,rank_list], dim=-1)
+            else:
+                retrieval_index = retrieval_list[..., :self.retrieval_k] 
+                #(bs,k,512)
+                retrieval_emb = self.encoded_reactants[retrieval_index]
+                #(bs,k,513) add rank as pe
+                if self.augmented_graphfeature:
+                    rank_list =  torch.arange(1, self.retrieval_k+ 1).unsqueeze(0).unsqueeze(-1).repeat(retrieval_index.size(0), 1, 1).to(self.device)  
+                    retrieval_emb = torch.cat([retrieval_emb,rank_list], dim=-1)
             #(bs,k*513)
             retrieval_emb = retrieval_emb.flatten(start_dim=1)
 
@@ -208,14 +226,6 @@ class MarkovBridge(pl.LightningModule):
         reactants, product, pred, node_mask, noisy_data, _ = self.process_and_forward(data)
         if self.loss_type == 'vlb':
             return self.compute_training_VLB(
-                reactants=reactants,
-                pred=pred,
-                node_mask=node_mask,
-                noisy_data=noisy_data,
-                i=i,
-            )
-        elif self.loss_type == 'myvlb':
-            return self.my_compute_training_VLB(
                 reactants=reactants,
                 pred=pred,
                 node_mask=node_mask,
@@ -320,33 +330,7 @@ class MarkovBridge(pl.LightningModule):
             self.train_loss.reset()
 
         return {'loss': loss}
-     
-   
-    def my_compute_training_VLB(self, reactants, pred, node_mask, noisy_data, i):
-        z_t = utils.PlaceHolder(X=noisy_data['X_t'], E=noisy_data['E_t'], y=noisy_data['y_t'])
-        z_T_true = reactants
-        z_T_pred = pred
-        t = noisy_data['t']
-
-        true_pX, true_pE = self.compute_q_zs_given_q_zt(z_t, z_T_true, node_mask, t=t)
-        pred_pX, pred_pE = self.my2_compute_p_zs_given_p_zt(z_t, z_T_pred, node_mask, t=t)
-
-        loss = self.train_loss(
-            masked_pred_X=pred_pX,
-            masked_pred_E=pred_pE,
-            true_X=true_pX,
-            true_E=true_pE,
-        )
-        if i % self.log_every_steps == 0:
-            self.log(f'train_loss/batch_CE', loss.detach())
-            for metric_name, metric in self.train_loss.compute_metrics().items():
-                self.log(f'train_loss/{metric_name}', metric)
-
-            self.train_loss.reset()
-
-        return {'loss': loss}
-
- 
+    
     def my_compute_validation_VLB(self, reactants, pred, node_mask, noisy_data, i):
         z_t = utils.PlaceHolder(X=noisy_data['X_t'], E=noisy_data['E_t'], y=noisy_data['y_t'])
         z_T_true = reactants
@@ -354,7 +338,7 @@ class MarkovBridge(pl.LightningModule):
         t = noisy_data['t']
 
         true_pX, true_pE = self.compute_q_zs_given_q_zt(z_t, z_T_true, node_mask, t=t)
-        pred_pX, pred_pE = self.my2_compute_p_zs_given_p_zt(z_t, z_T_pred, node_mask, t=t)
+        pred_pX, pred_pE = self.my_compute_p_zs_given_p_zt(z_t, z_T_pred, node_mask, t=t)
 
         loss = self.val_loss(
             masked_pred_X=pred_pX,
@@ -371,7 +355,6 @@ class MarkovBridge(pl.LightningModule):
 
         return {'loss': loss}
 
-
     def on_validation_epoch_start(self) -> None:
         self.val_loss.reset()
         self.sampling_metrics.reset()
@@ -380,14 +363,6 @@ class MarkovBridge(pl.LightningModule):
         reactants, product, pred, node_mask, noisy_data, context = self.process_and_forward(data)
         if self.loss_type == 'vlb':
             return self.compute_validation_VLB(
-                reactants=reactants,
-                pred=pred,
-                node_mask=node_mask,
-                noisy_data=noisy_data,
-                i=i,
-            )
-        elif self.loss_type == 'myvlb':
-            return self.my_compute_validation_VLB(
                 reactants=reactants,
                 pred=pred,
                 node_mask=node_mask,
@@ -422,6 +397,39 @@ class MarkovBridge(pl.LightningModule):
                 break
 
             data = data.to(self.device)
+
+            #Context product
+            product, node_mask = utils.to_dense(data.p_x, data.p_edge_index, data.p_edge_attr, data.batch)
+            product = product.mask(node_mask)
+            context = product.clone() if self.use_context else None
+            #(bs,k)
+            if self.retrieval_k > 0:
+                retrieval_list = data.retrieval_list
+                # TODO: enable randomly picking k molecules from the top-d ones; their original rank might be useful as PE
+                # use original rank as PE but not randomly picking molecules
+                if self.add_product:   
+                    product_index = retrieval_list[..., :1] 
+                    retrieval_index = retrieval_list[..., 1:self.retrieval_k+1] 
+                    #(bs,k,512)
+                    retrieval_emb = self.encoded_reactants[retrieval_index]
+                    product_emb = self.train_encoded_product[product_index]
+                    retrieval_emb = torch.cat([product_emb,retrieval_emb],dim=1)
+                    #(bs,k,513) add rank as pe
+                    if self.augmented_graphfeature:
+                        rank_list =  torch.arange(1, self.retrieval_k+ 2).unsqueeze(0).unsqueeze(-1).repeat(retrieval_index.size(0), 1, 1).to(self.device)  
+                        retrieval_emb = torch.cat([retrieval_emb,rank_list], dim=-1)
+                else:
+                    retrieval_index = retrieval_list[..., :self.retrieval_k] 
+                    #(bs,k,512)
+                    retrieval_emb = self.encoded_reactants[retrieval_index]
+                    #(bs,k,513) add rank as pe
+                    if self.augmented_graphfeature:
+                        rank_list =  torch.arange(1, self.retrieval_k+ 1).unsqueeze(0).unsqueeze(-1).repeat(retrieval_index.size(0), 1, 1).to(self.device)  
+                        retrieval_emb = torch.cat([retrieval_emb,rank_list], dim=-1)
+                #(bs,k*513)
+                retrieval_emb = retrieval_emb.flatten(start_dim=1)
+            else: retrieval_emb=None
+                
             bs = len(data.batch.unique())
             to_generate = bs
             to_save = min(samples_left_to_save, bs)
@@ -437,6 +445,10 @@ class MarkovBridge(pl.LightningModule):
                     keep_chain=chains_save,
                     number_chain_steps_to_save=self.number_chain_steps_to_save,
                     sample_idx=sample_idx,
+                    product = product,
+                    context = context,
+                    retrieval_emb= retrieval_emb,
+                    node_mask=node_mask,
                 )
                 samples.extend(molecule_list)
                 batch_groups.append(molecule_list)
@@ -546,6 +558,10 @@ class MarkovBridge(pl.LightningModule):
             sample_idx,
             save_true_reactants=True,
             use_one_hot=False,
+            product = None,
+            context = None,
+            retrieval_emb= None,
+            node_mask=None,
     ):
         """
         :param data
@@ -567,6 +583,10 @@ class MarkovBridge(pl.LightningModule):
             number_chain_steps_to_save=number_chain_steps_to_save,
             save_true_reactants=save_true_reactants,
             use_one_hot=use_one_hot,
+            product = product,
+            context = context,
+            retrieval_emb= retrieval_emb,
+            node_mask=node_mask,
         )
 
         if self.visualization_tools is not None:
@@ -584,28 +604,9 @@ class MarkovBridge(pl.LightningModule):
         return molecule_list, true_molecule_list, products_list, [0] * len(molecule_list), nll, ell
     def sample_chain(
             self, data, batch_size, keep_chain, number_chain_steps_to_save, save_true_reactants, use_one_hot=False,
+            product = None,context = None,retrieval_emb= None,node_mask=None,
     ):
         
-        #Context product
-        product, node_mask = utils.to_dense(data.p_x, data.p_edge_index, data.p_edge_attr, data.batch)
-        product = product.mask(node_mask)
-
-        #(bs,k)
-        if self.retrieval_k > 0:
-            retrieval_list = data.retrieval_list
-            # TODO: enable randomly picking k molecules from the top-d ones; their original rank might be useful as PE
-            # use original rank as PE but not randomly picking molecules
-            retrieval_index = retrieval_list[..., :self.retrieval_k]
-            #(bs,k,512)
-            retrieval_emb = self.encoded_reactants[retrieval_index]
-            #(bs,k,513) add rank as pe
-            rank_list =  torch.arange(1, self.retrieval_k+ 1).unsqueeze(0).unsqueeze(-1).repeat(retrieval_index.size(0), 1, 1).to(self.device)  
-            retrieval_emb = torch.cat([retrieval_emb,rank_list], dim=-1)
-            #(bs,k*513)
-            retrieval_emb = retrieval_emb.flatten(start_dim=1)
-        else: retrieval_emb = None 
-
-
         # context, c_node_mask = utils.to_dense(data.context_x, data.context_edge_index, data.context_edge_attr,
         #                                       data.batch)
         # context = context.mask(c_node_mask)
@@ -662,8 +663,6 @@ class MarkovBridge(pl.LightningModule):
         # context.X = torch.cat([context.X, restored_node_labels.unsqueeze(-1)], dim = -1)
         # context.E = torch.cat([context.E, edge_labels], dim = -1)  
         # context = context.mask(node_mask)      
-        
-        context = product.clone() if self.use_context else None
 
         # Masks for fixed and modifiable nodes
         fixed_nodes = (product.X[..., -1] == 0).unsqueeze(-1)
@@ -820,7 +819,7 @@ class MarkovBridge(pl.LightningModule):
         # Neural net predictions
         noisy_data = {'X_t': X_t, 'E_t': E_t, 'y_t': y_t, 't': t, 'node_mask': node_mask}
         extra_data = self.compute_extra_data(noisy_data, context=context)
-        if retrieval_emb!=None: extra_data.y = torch.cat([extra_data.y,retrieval_emb], dim=1)
+        extra_data.y = torch.cat([extra_data.y,retrieval_emb], dim=1)
         pred = self.forward(noisy_data, extra_data, node_mask)
 
         # Normalize predictions
@@ -957,7 +956,6 @@ class MarkovBridge(pl.LightningModule):
 
         return prob_X, prob_E
 
-
     def my2_compute_p_zs_given_p_zt(self, z_t, pred, node_mask, t):
         p_X_T = F.softmax(pred.X, dim=-1)  # bs, n, d
         p_E_T = F.softmax(pred.E, dim=-1)  # bs, n, n, d
@@ -989,8 +987,8 @@ class MarkovBridge(pl.LightningModule):
 
     def my_compute_p_zs_given_p_zt(self, z_t, pred, node_mask, t):
 
-        prob_X = torch.zeros_like(F.softmax(pred.X, dim=-1))   # bs, n, d
-        prob_E = torch.zeros_like(F.softmax(pred.E, dim=-1))  # bs, n, n, d
+        prob_X = torch.zeros_like(p_X_T)  # bs, n, d
+        prob_E = torch.zeros_like(p_E_T)  # bs, n, n, d
 
         # TODO: allow customizable #iterations
         for i in range(4):

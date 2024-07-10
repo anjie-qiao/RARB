@@ -121,6 +121,7 @@ def main(args):
                     retrieval_emb = torch.cat([retrieval_emb,rank_list], dim=-1)
                 #(bs,k*513)
                 retrieval_emb = retrieval_emb.flatten(start_dim=1)
+            else: retrieval_emb=None
 
             if args.model == 'OneShot':
                 pred_molecule_list, true_molecule_list, products_list, scores, nlls, ells = model.sample_batch(
