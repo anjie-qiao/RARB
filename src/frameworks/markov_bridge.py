@@ -177,7 +177,7 @@ class MarkovBridge(pl.LightningModule):
             retrieval_emb = torch.cat([retrieval_emb,rank_list], dim=-1)
             #(bs,k*513)
             # random select k retrieval embedding
-            random_indices = torch.randperm(5)[:3]
+            random_indices = torch.randperm(self.retrieval_k + extra_retri)[:self.retrieval_k]
             selected_tensor = retrieval_emb[:, random_indices, :]
             retrieval_emb = selected_tensor.flatten(start_dim=1)
 
@@ -610,7 +610,7 @@ class MarkovBridge(pl.LightningModule):
             retrieval_emb = torch.cat([retrieval_emb,rank_list], dim=-1)
             #(bs,k*513)
             # random select k retrieval embedding
-            random_indices = torch.randperm(5)[:3]
+            random_indices = torch.randperm(self.retrieval_k + extra_retri)[:self.retrieval_k]
             selected_tensor = retrieval_emb[:, random_indices, :]
             retrieval_emb = selected_tensor.flatten(start_dim=1)
         else: retrieval_emb = None 
