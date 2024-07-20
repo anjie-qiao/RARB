@@ -56,6 +56,7 @@ if __name__ == "__main__":
 
     # Find unique SMILES
     unique_smiles = list(set(df['pred']))
+    print("unique_smiles: ",len(unique_smiles))
 
     # Tokenize
     tokenized_smiles = [smi_tokenizer(s.strip()) for s in unique_smiles]

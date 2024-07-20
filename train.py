@@ -10,7 +10,7 @@ from src.features.extra_features_molecular import ExtraMolecularFeatures
 from src.metrics.molecular_metrics_discrete import TrainMolecularMetricsDiscrete
 from src.metrics.sampling_metrics import SamplingMolecularMetrics
 from src.analysis.visualization import MolecularVisualization
-from src.frameworks.markov_bridge_product import MarkovBridge
+from src.frameworks.markov_bridge import MarkovBridge
 from src.frameworks.discrete_diffusion import DiscreteDiffusion
 from src.frameworks.one_shot_model import OneShotModel
 import torch
@@ -62,7 +62,6 @@ def main(args):
         evaluation=False,
         retrieval_dataset=args.retrieval_dataset,
         augmented_graphfeature=args.augmented_graphfeature,
-        add_product=args.add_product,
     )
     dataset_infos = RetroBridgeDatasetInfos(datamodule)
 
@@ -133,7 +132,6 @@ def main(args):
             retrieval_k=args.retrieval_k,
             encoded_reactants=encoded_reactants,
             augmented_graphfeature=args.augmented_graphfeature,
-            add_product=args.add_product,
         )
     elif args.model == 'DiGress':
         model = DiscreteDiffusion(

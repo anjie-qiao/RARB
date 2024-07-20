@@ -23,7 +23,7 @@ def main(args):
     checkpoint_name = args.checkpoint.split('/')[-1].replace('.ckpt', '')
 
     output_dir = os.path.join(args.samples, f'{args.dataset}_{args.mode}')
-    table_name = f'{checkpoint_name}_{args.retrieval_k}_{args.retrieval_dataset}_T={args.n_steps}_n={args.n_samples}_seed={args.sampling_seed}.csv'
+    table_name = f'{checkpoint_name}_{args.retrieval_k}_dropout{args.dropout}_{args.retrieval_dataset}_T={args.n_steps}_n={args.n_samples}_seed={args.sampling_seed}.csv'
     table_path = os.path.join(output_dir, table_name)
 
     skip_first_n = 0
@@ -82,13 +82,13 @@ def main(args):
     computed_ells = []
 
     dataloader = datamodule.test_dataloader() if args.mode == 'test' else datamodule.val_dataloader()
-    # if args.retrieval_dataset == "50k":
-    #     tensor1 = torch.load("data/uspto50k/raw/rxn_encoded_react_tensor.pt")
-    #     tensor2 = torch.load("data/uspto50k/raw/rxn_encoded_react_tensor_val.pt")
-    #     encoded_reactants = torch.cat((tensor1,tensor2), dim=0)
-    # elif args.retrieval_dataset == "application":
-    #     encoded_reactants = torch.load("data/uspto50k/raw/rxn_encoded_reac_uspto_full.pt")
-    # else: encoded_reactants = None
+    if args.retrieval_dataset == "50k":
+        tensor1 = torch.load("data/uspto50k/raw/rxn_encoded_react_tensor.pt")
+        tensor2 = torch.load("data/uspto50k/raw/rxn_encoded_react_tensor_val.pt")
+        encoded_reactants = torch.cat((tensor1,tensor2), dim=0)
+    elif args.retrieval_dataset == "application":
+        encoded_reactants = torch.load("data/uspto50k/raw/rxn_encoded_reac_uspto_full.pt")
+    else: encoded_reactants = None
 
     for i, data in enumerate(tqdm(dataloader)):
         if i * args.batch_size < skip_first_n:
@@ -134,6 +134,7 @@ def main(args):
                     sample_idx=sample_idx,
                     save_true_reactants=True,
                     use_one_hot=args.use_one_hot,
+                    encoded_reactants=encoded_reactants,
                 )
 
             batch_groups.append(pred_molecule_list)
@@ -175,16 +176,16 @@ def main(args):
             true_mol, true_n_dummy_atoms = build_molecule(
                 true_mol[0], true_mol[1], dataset_infos.atom_decoder, return_n_dummy_atoms=True
             )
-            true_smi = Chem.MolToSmiles(true_mol)
+            true_smi = Chem.MolToSmiles(true_mol, isomericSmiles=True)
 
             product_mol = build_molecule(product_mol[0], product_mol[1], dataset_infos.atom_decoder)
-            product_smi = Chem.MolToSmiles(product_mol)
+            product_smi = Chem.MolToSmiles(product_mol, isomericSmiles=True)
 
             for pred_mol, pred_score, nll, ell in zip(pred_mols, pred_scores, nlls, ells):
                 pred_mol, n_dummy_atoms = build_molecule(
                     pred_mol[0], pred_mol[1], dataset_infos.atom_decoder, return_n_dummy_atoms=True
                 )
-                pred_smi = Chem.MolToSmiles(pred_mol)
+                pred_smi = Chem.MolToSmiles(pred_mol, isomericSmiles=True)
                 true_molecules_smiles.append(true_smi)
                 product_molecules_smiles.append(product_smi)
                 pred_molecules_smiles.append(pred_smi)

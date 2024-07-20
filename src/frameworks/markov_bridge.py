@@ -165,17 +165,21 @@ class MarkovBridge(pl.LightningModule):
 
         #(bs,k)
         if self.retrieval_k > 0:
+            extra_retri = 2
             retrieval_list = data.retrieval_list
             # TODO: enable randomly picking k molecules from the top-d ones; their original rank might be useful as PE
             # use original rank as PE but not randomly picking molecules
-            retrieval_index = retrieval_list[..., :self.retrieval_k]
+            retrieval_index = retrieval_list[..., :self.retrieval_k + extra_retri]
             #(bs,k,512)
             retrieval_emb = self.encoded_reactants[retrieval_index]
             #(bs,k,513) add rank as pe
-            rank_list =  torch.arange(1, self.retrieval_k+ 1).unsqueeze(0).unsqueeze(-1).repeat(retrieval_index.size(0), 1, 1).to(self.device)  
+            rank_list =  torch.arange(1, self.retrieval_k+ 1 + extra_retri).unsqueeze(0).unsqueeze(-1).repeat(retrieval_index.size(0), 1, 1).to(self.device)  
             retrieval_emb = torch.cat([retrieval_emb,rank_list], dim=-1)
             #(bs,k*513)
-            retrieval_emb = retrieval_emb.flatten(start_dim=1)
+            # random select k retrieval embedding
+            random_indices = torch.randperm(5)[:3]
+            selected_tensor = retrieval_emb[:, random_indices, :]
+            retrieval_emb = selected_tensor.flatten(start_dim=1)
 
         assert torch.allclose(r_node_mask, p_node_mask)
         node_mask = r_node_mask
@@ -546,6 +550,7 @@ class MarkovBridge(pl.LightningModule):
             sample_idx,
             save_true_reactants=True,
             use_one_hot=False,
+            encoded_reactants=None,
     ):
         """
         :param data
@@ -567,6 +572,7 @@ class MarkovBridge(pl.LightningModule):
             number_chain_steps_to_save=number_chain_steps_to_save,
             save_true_reactants=save_true_reactants,
             use_one_hot=use_one_hot,
+            encoded_reactants=encoded_reactants,
         )
 
         if self.visualization_tools is not None:
@@ -583,7 +589,7 @@ class MarkovBridge(pl.LightningModule):
 
         return molecule_list, true_molecule_list, products_list, [0] * len(molecule_list), nll, ell
     def sample_chain(
-            self, data, batch_size, keep_chain, number_chain_steps_to_save, save_true_reactants, use_one_hot=False,
+            self, data, batch_size, keep_chain, number_chain_steps_to_save, save_true_reactants, use_one_hot=False,encoded_reactants=None,
     ):
         
         #Context product
@@ -592,17 +598,21 @@ class MarkovBridge(pl.LightningModule):
 
         #(bs,k)
         if self.retrieval_k > 0:
+            extra_retri = 2
             retrieval_list = data.retrieval_list
             # TODO: enable randomly picking k molecules from the top-d ones; their original rank might be useful as PE
             # use original rank as PE but not randomly picking molecules
-            retrieval_index = retrieval_list[..., :self.retrieval_k]
+            retrieval_index = retrieval_list[..., :self.retrieval_k + extra_retri]
             #(bs,k,512)
             retrieval_emb = self.encoded_reactants[retrieval_index]
             #(bs,k,513) add rank as pe
-            rank_list =  torch.arange(1, self.retrieval_k+ 1).unsqueeze(0).unsqueeze(-1).repeat(retrieval_index.size(0), 1, 1).to(self.device)  
+            rank_list =  torch.arange(1, self.retrieval_k+ 1 + extra_retri).unsqueeze(0).unsqueeze(-1).repeat(retrieval_index.size(0), 1, 1).to(self.device)  
             retrieval_emb = torch.cat([retrieval_emb,rank_list], dim=-1)
             #(bs,k*513)
-            retrieval_emb = retrieval_emb.flatten(start_dim=1)
+            # random select k retrieval embedding
+            random_indices = torch.randperm(5)[:3]
+            selected_tensor = retrieval_emb[:, random_indices, :]
+            retrieval_emb = selected_tensor.flatten(start_dim=1)
         else: retrieval_emb = None 
 
 
