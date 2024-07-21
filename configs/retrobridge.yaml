@@ -44,9 +44,8 @@ hidden_dims: {'dx': 256, 'de': 64, 'dy': 64, 'n_head': 8, 'dim_ffX': 256, 'dim_f
 retrieval_k: 3
 embedding: rxn
 augmented_graphfeature: True
-retrieval_dataset: 50k # 50k or application
-add_product: True
-dropout: 0.1
+retrieval_dataset: application # 50k or application
+dropout: 0.5
 
 # Training
 n_epochs: 1000

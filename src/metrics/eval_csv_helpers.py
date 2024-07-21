@@ -91,7 +91,7 @@ def compute_accuracy(df, top=[1, 3, 5], scoring=None, verbose=False):
     results['validity'] = {}
 
     df['exact_match'] = df['true'] == df['pred']
-    df['validity'] = df['pred'].apply(validate_smiles_openbabel)
+    #df['validity'] = df['pred'].apply(validate_smiles_openbabel)
 
     if round_trip:
         #         results['Round-trip only coverage'] = {}
@@ -106,10 +106,10 @@ def compute_accuracy(df, top=[1, 3, 5], scoring=None, verbose=False):
         topk_df = df.groupby(['group']).apply(partial(get_top_k, k=k, scoring=scoring)).reset_index(drop=True)
 
         acc_exact_match = topk_df.groupby('group').exact_match.any().mean()
-        validity = topk_df.groupby('group').validity.any().mean()
+        #validity = topk_df.groupby('group').validity.any().mean()
 
         results['Exact match'][f'top-{k}'] = acc_exact_match
-        results['validity'][f'top-{k}'] = validity
+        #results['validity'][f'top-{k}'] = validity
         if verbose:
             print(f"\nTop-{k}")
             print("Exact match accuracy", acc_exact_match)
