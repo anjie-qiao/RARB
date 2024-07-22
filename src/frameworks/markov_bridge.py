@@ -182,6 +182,7 @@ class MarkovBridge(pl.LightningModule):
             selected_tensor = retrieval_emb.gather(1, random_indices_expanded)
             retrieval_emb = selected_tensor.flatten(start_dim=1)
 
+
         assert torch.allclose(r_node_mask, p_node_mask)
         node_mask = r_node_mask
 
@@ -574,6 +575,7 @@ class MarkovBridge(pl.LightningModule):
             save_true_reactants=save_true_reactants,
             use_one_hot=use_one_hot,
             encoded_reactants=encoded_reactants,
+
         )
 
         if self.visualization_tools is not None:
@@ -832,7 +834,9 @@ class MarkovBridge(pl.LightningModule):
         # Neural net predictions
         noisy_data = {'X_t': X_t, 'E_t': E_t, 'y_t': y_t, 't': t, 'node_mask': node_mask}
         extra_data = self.compute_extra_data(noisy_data, context=context)
+        
         if retrieval_emb!=None: extra_data.y = torch.cat([extra_data.y,retrieval_emb], dim=1)
+          
         pred = self.forward(noisy_data, extra_data, node_mask)
 
         # Normalize predictions
@@ -979,9 +983,10 @@ class MarkovBridge(pl.LightningModule):
         X_T_all = X_T_all.view(self.Xdim_output, 1, 1, -1).expand(-1, p_X_T.size(0), p_X_T.size(1), -1)
         E_T_all = E_T_all.view(self.Edim_output, 1, 1, 1, -1).expand(-1, p_E_T.size(0), p_E_T.size(1), p_E_T.size(2), -1)
 
+    def my_compute_p_zs_given_p_zt(self, z_t, pred, node_mask, t):
+
         prob_X = torch.zeros_like(p_X_T)  # bs, n, d
         prob_E = torch.zeros_like(p_E_T)  # bs, n, n, d
-
         E_T_i_x = F.one_hot(torch.zeros_like(p_E_T[..., 0]).long(), num_classes=self.Edim_output).float()
         for i in range(self.Xdim_output):
             z_T = utils.PlaceHolder(X_T_all[i], E_T_i_x)
@@ -1003,7 +1008,6 @@ class MarkovBridge(pl.LightningModule):
 
         prob_X = torch.zeros_like(F.softmax(pred.X, dim=-1))   # bs, n, d
         prob_E = torch.zeros_like(F.softmax(pred.E, dim=-1))  # bs, n, n, d
-
         # TODO: allow customizable #iterations
         for i in range(4):
             # TODO: tau decays from 10.0 to 0.1
