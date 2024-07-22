@@ -92,10 +92,11 @@ def main(args):
     
     encoded_reactants = torch.cat(encoded_reactants,dim=0)
     encoded_products = torch.cat(encoded_products,dim=0)
-    print(encoded_reactants.shape)
+    #print(encoded_reactants.shape)
     print(encoded_products.shape)
-    torch.save(encoded_reactants, 'rxn_encoded_reac_uspto_full.pt')
-    torch.save(encoded_products, 'rxn_encoded_prod_uspto_full.pt')
+    #torch.save(encoded_reactants, 'rxn_encoded_reac_uspto_full.pt')
+    torch.save(encoded_products, 'rxn_encoded_prod_uspto50k_test.pt')
+
     
 if __name__ == '__main__':
     argparser = argparse.ArgumentParser()

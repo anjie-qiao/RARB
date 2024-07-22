@@ -16,6 +16,7 @@ samples_per_input: 5
 chains_to_save: 5
 number_chain_steps_to_save: 50
 enable_progress_bar: True
+visualization: False
 
 # Data
 dataset: uspto50k
@@ -40,10 +41,10 @@ hidden_mlp_dims: {'X': 256, 'E': 128, 'y': 128}
 hidden_dims: {'dx': 256, 'de': 64, 'dy': 64, 'n_head': 8, 'dim_ffX': 256, 'dim_ffE': 128, 'dim_ffy': 128}
 
 #retrieval
-retrieval_k: 3
+retrieval_k: 1
 embedding: rxn
-augmented_graphfeature: True
-retrieval_dataset: 50k # 50k or application
+augmented_graphfeature: False
+retrieval_dataset: application # 50k or application
 dropout: 0.1
 
 # Training

@@ -5,17 +5,19 @@ from pathlib import Path
 from src.metrics.eval_csv_helpers import canonicalize, compute_confidence, assign_groups, compute_accuracy
 
 
-csv_file = Path('./samples/uspto50k_test/epoch=479_top_5_accuracy=0.930_T=500_n=10_seednodelabel+predE=1.csv')
+
+csv_file = Path('./samples/uspto50k_test/epoch=579_top_5_accuracy=0.773_3_dropout0.1_application_T=500_n=100_seed=1.csv')
+#csv_file = Path('./round_samples/epoch=599_top_5_accuracy=0.812_3_application_T=500_n=100_seed=1.csv')
 df = pd.read_csv(csv_file)
-
-df = df[df['nc_label']==1]
-
-df['from_file'] = 'epoch=479_top_5_accuracy=0.930_T=500_n=10_seed22=1'
-df = assign_groups(df, samples_per_product_per_file=10)
+df = df.iloc[:6400]
+df_unique = df.drop_duplicates(subset=['pred'])
+print(len(df_unique))
+print(len(df)/100)
+df['from_file'] = 'from_file'
+df = assign_groups(df, samples_per_product_per_file=100)
 df.loc[(df['product'] == 'C') & (df['true'] == 'C'), 'true'] = 'Placeholder'
 
 df_processed = compute_confidence(df)
-
 for key in ['product', 'pred']:
     df_processed[key] = df_processed[key].apply(canonicalize)
 

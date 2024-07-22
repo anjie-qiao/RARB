@@ -3,6 +3,7 @@ import pandas as pd
 from functools import partial
 from tqdm import tqdm
 from rdkit import Chem
+import openbabel
 
 
 def canonicalize(smi):
@@ -57,14 +58,40 @@ def get_top_k(df, k, scoring=None):
 
     return df.head(k)
 
+def validate_smiles(smiles):
+    try:
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            return False
+        # else:
+        #     Chem.SanitizeMol(mol)
+        #     return True
+    except:
+        return False
+    return True
+
+
+def validate_smiles_openbabel(smiles):
+    if not isinstance(smiles, str):
+       return False
+    obConversion = openbabel.OBConversion()
+    obConversion.SetInAndOutFormats("smi", "mdl")
+    mol = openbabel.OBMol()
+    if obConversion.ReadString(mol, smiles):
+        return True
+    else:
+        print(f"Invalid SMILES in Open Babel: {smiles}")
+        return False
 
 def compute_accuracy(df, top=[1, 3, 5], scoring=None, verbose=False):
     round_trip = 'pred_product' in df.columns
 
     results = {}
     results['Exact match'] = {}
+    results['validity'] = {}
 
     df['exact_match'] = df['true'] == df['pred']
+    #df['validity'] = df['pred'].apply(validate_smiles_openbabel)
 
     if round_trip:
         #         results['Round-trip only coverage'] = {}
@@ -79,7 +106,10 @@ def compute_accuracy(df, top=[1, 3, 5], scoring=None, verbose=False):
         topk_df = df.groupby(['group']).apply(partial(get_top_k, k=k, scoring=scoring)).reset_index(drop=True)
 
         acc_exact_match = topk_df.groupby('group').exact_match.any().mean()
+        #validity = topk_df.groupby('group').validity.any().mean()
+
         results['Exact match'][f'top-{k}'] = acc_exact_match
+        #results['validity'][f'top-{k}'] = validity
         if verbose:
             print(f"\nTop-{k}")
             print("Exact match accuracy", acc_exact_match)

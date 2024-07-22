@@ -7,7 +7,10 @@ RetroClassifier/
 samples/
 /models/
 ckpt_classifier/
-X_output.csv/
+onmt/
+OpenNMT_py.egg-info/
+round_samples/
+
 
 
 # Uni-rxn .gitignore setting

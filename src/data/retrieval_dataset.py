@@ -88,7 +88,7 @@ class RetroBridgeDataset(InMemoryDataset):
     def raw_file_names(self):
         if self.retrieval_dataset == '50k':
             return ['uspto50k_train_unirxnfp.csv', 'uspto50k_val_unirxnfp.csv', 'uspto50k_test_unirxnfp.csv']
-        elif self.retrieval_dataset == 'application':
+        elif self.retrieval_dataset == 'application': 
             return ['uspto50k_train_application.csv', 'uspto50k_val_application.csv', 'uspto50k_test_application.csv']
         else:
             return ['uspto50k_train.csv', 'uspto50k_val.csv', 'uspto50k_test.csv']
@@ -96,7 +96,7 @@ class RetroBridgeDataset(InMemoryDataset):
     def split_file_name(self):
         if self.retrieval_dataset == '50k':
             return ['uspto50k_train_unirxnfp.csv', 'uspto50k_val_unirxnfp.csv', 'uspto50k_test_unirxnfp.csv']
-        elif self.retrieval_dataset == 'application':
+        elif self.retrieval_dataset == 'application': 
             return ['uspto50k_train_application.csv', 'uspto50k_val_application.csv', 'uspto50k_test_application.csv']
         else:
             return ['uspto50k_train.csv', 'uspto50k_val.csv', 'uspto50k_test.csv']
