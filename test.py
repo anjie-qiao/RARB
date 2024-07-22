@@ -5,10 +5,10 @@ from pathlib import Path
 from src.metrics.eval_csv_helpers import canonicalize, compute_confidence, assign_groups, compute_accuracy
 
 
-csv_file = Path('./samples/uspto50k_test/epoch=659_top_5_accuracy=0.820_3_application_T=500_n=100_seed=1.csv')
+csv_file = Path('./samples/uspto50k_test/epoch=579_top_5_accuracy=0.773_3_dropout0.1_application_T=500_n=100_seed=1.csv')
 #csv_file = Path('./round_samples/epoch=599_top_5_accuracy=0.812_3_application_T=500_n=100_seed=1.csv')
 df = pd.read_csv(csv_file)
-#df = df.iloc[:224000]
+df = df.iloc[:6400]
 df_unique = df.drop_duplicates(subset=['pred'])
 print(len(df_unique))
 print(len(df)/100)

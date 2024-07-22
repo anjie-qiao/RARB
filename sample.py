@@ -5,7 +5,7 @@ import pandas as pd
 from src.utils import disable_rdkit_logging, parse_yaml_config, set_deterministic
 from src.analysis.rdkit_functions import build_molecule
 from src.frameworks.discrete_diffusion import DiscreteDiffusion
-from src.frameworks.markov_bridge import MarkovBridge
+from src.frameworks.markov_bridge_sample import MarkovBridge
 from src.frameworks.one_shot_model import OneShotModel
 from src.data.retrieval_dataset import RetroBridgeDataModule, RetroBridgeDatasetInfos
 
@@ -176,16 +176,16 @@ def main(args):
             true_mol, true_n_dummy_atoms = build_molecule(
                 true_mol[0], true_mol[1], dataset_infos.atom_decoder, return_n_dummy_atoms=True
             )
-            true_smi = Chem.MolToSmiles(true_mol, isomericSmiles=True)
+            true_smi = Chem.MolToSmiles(true_mol)
 
             product_mol = build_molecule(product_mol[0], product_mol[1], dataset_infos.atom_decoder)
-            product_smi = Chem.MolToSmiles(product_mol, isomericSmiles=True)
+            product_smi = Chem.MolToSmiles(product_mol)
 
             for pred_mol, pred_score, nll, ell in zip(pred_mols, pred_scores, nlls, ells):
                 pred_mol, n_dummy_atoms = build_molecule(
                     pred_mol[0], pred_mol[1], dataset_infos.atom_decoder, return_n_dummy_atoms=True
                 )
-                pred_smi = Chem.MolToSmiles(pred_mol, isomericSmiles=True)
+                pred_smi = Chem.MolToSmiles(pred_mol)
                 true_molecules_smiles.append(true_smi)
                 product_molecules_smiles.append(product_smi)
                 pred_molecules_smiles.append(pred_smi)
