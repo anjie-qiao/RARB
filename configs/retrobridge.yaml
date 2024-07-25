@@ -25,6 +25,7 @@ num_workers: 6
 shuffle: True
 extra_nodes: True
 swap: False
+use_cluster: False
 
 # Diffusion
 diffusion_steps: 500
@@ -41,11 +42,11 @@ hidden_mlp_dims: {'X': 256, 'E': 128, 'y': 128}
 hidden_dims: {'dx': 256, 'de': 64, 'dy': 64, 'n_head': 8, 'dim_ffX': 256, 'dim_ffE': 128, 'dim_ffy': 128}
 
 #retrieval
-retrieval_k: 1
+retrieval_k: 3
 embedding: rxn
-augmented_graphfeature: False
-retrieval_dataset: application # 50k or application
-dropout: 0.1
+augmented_graphfeature: True
+retrieval_dataset: 50k # 50k or application
+dropout: 0.5
 
 # Training
 n_epochs: 1000
