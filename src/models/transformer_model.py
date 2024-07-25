@@ -15,7 +15,7 @@ from src.models.layers import Xtoy, Etoy, masked_softmax
 
 class AugmentedGraphFeatureEncoder(nn.Module):
 
-    def __init__(self, raw_y_dim, y_hidden_mlp_dim, y_hidden_dim, retrieval_k, act_fn_in: nn.ReLU(), graph_emb_dim: int=512, dropout: float = 0.1,
+    def __init__(self, raw_y_dim, y_hidden_mlp_dim, y_hidden_dim, retrieval_k, act_fn_in: nn.ReLU(), graph_emb_dim: int=512, dropout: float = 0.5,
                  kdim : int=512, vdim: int=512, num_heads: int=8):
 
         super(AugmentedGraphFeatureEncoder, self).__init__()

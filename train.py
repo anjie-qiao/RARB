@@ -62,6 +62,7 @@ def main(args):
         evaluation=False,
         retrieval_dataset=args.retrieval_dataset,
         augmented_graphfeature=args.augmented_graphfeature,
+        use_cluster=args.use_cluster,
     )
     dataset_infos = RetroBridgeDatasetInfos(datamodule)
 

@@ -165,21 +165,18 @@ class MarkovBridge(pl.LightningModule):
 
         #(bs,k)
         if self.retrieval_k > 0:
-            extra_retri = 2
             retrieval_list = data.retrieval_list
             # TODO: enable randomly picking k molecules from the top-d ones; their original rank might be useful as PE
             # use original rank as PE but not randomly picking molecules
-            retrieval_index = retrieval_list[..., :self.retrieval_k + extra_retri]
+            retrieval_index = retrieval_list[..., :self.retrieval_k]
             #(bs,k,512)
             retrieval_emb = self.encoded_reactants[retrieval_index]
             #(bs,k,513) add rank as pe
-            rank_list =  torch.arange(1, self.retrieval_k+ 1 + extra_retri).unsqueeze(0).unsqueeze(-1).repeat(retrieval_index.size(0), 1, 1).to(self.device)  
+            rank_list =  torch.arange(1, self.retrieval_k+ 1).unsqueeze(0).unsqueeze(-1).repeat(retrieval_index.size(0), 1, 1).to(self.device)  
             retrieval_emb = torch.cat([retrieval_emb,rank_list], dim=-1)
             #(bs,k*513)
             # random select k retrieval embedding
-            random_indices = torch.stack([torch.randperm(self.retrieval_k + extra_retri)[:self.retrieval_k] for _ in range(retrieval_emb.size(0))], dim=0)
-            selected_tensor = retrieval_emb[:, random_indices, :]
-            retrieval_emb = selected_tensor.flatten(start_dim=1)
+            retrieval_emb = retrieval_emb.flatten(start_dim=1)
 
         assert torch.allclose(r_node_mask, p_node_mask)
         node_mask = r_node_mask
@@ -606,8 +603,8 @@ class MarkovBridge(pl.LightningModule):
             #retrieval_emb = self.encoded_reactants[retrieval_index]
             retrieval_emb = encoded_reactants[retrieval_index]
             #(bs,k,513) add rank as pe
-            # rank_list =  torch.arange(1, self.retrieval_k+ 1 ).unsqueeze(0).unsqueeze(-1).repeat(retrieval_index.size(0), 1, 1).to(self.device)  
-            # retrieval_emb = torch.cat([retrieval_emb,rank_list], dim=-1)
+            rank_list =  torch.arange(1, self.retrieval_k+ 1).unsqueeze(0).unsqueeze(-1).repeat(retrieval_index.size(0), 1, 1).to(self.device)  
+            retrieval_emb = torch.cat([retrieval_emb,rank_list], dim=-1)
             # #(bs,k*513)
             retrieval_emb = retrieval_emb.flatten(start_dim=1)
         else: retrieval_emb = None 
