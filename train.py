@@ -37,6 +37,7 @@ def find_last_checkpoint(checkpoints_dir):
 def main(args):
     start_time = datetime.now().strftime('%d_%m_%H_%M_%S')
     run_name = f'{args.experiment_name}_k={args.retrieval_k}_{args.retrieval_dataset}_emb{args.embedding}_{start_time}'
+
     experiment = run_name if args.resume is None else args.resume
     print(f'EXPERIMENT: {experiment}')
 
@@ -90,6 +91,7 @@ def main(args):
         visualization_tools = MolecularVisualization(dataset_infos)
     else:
         visualization_tools = None
+
     
     if args.retrieval_dataset == "50k":
         #(40008,512)

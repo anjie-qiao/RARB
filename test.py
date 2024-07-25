@@ -5,7 +5,9 @@ from pathlib import Path
 from src.metrics.eval_csv_helpers import canonicalize, compute_confidence, assign_groups, compute_accuracy
 
 
+
 csv_file = Path('./samples/uspto50k_test/epoch=479_top_5_accuracy=0.828_3_application_T=500_n=100_seed=1.csv')
+
 #csv_file = Path('./round_samples/epoch=599_top_5_accuracy=0.812_3_application_T=500_n=100_seed=1.csv')
 df = pd.read_csv(csv_file)
 #df = df.iloc[:6400]

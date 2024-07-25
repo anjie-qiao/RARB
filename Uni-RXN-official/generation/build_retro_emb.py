@@ -96,6 +96,7 @@ def main(args):
     print(encoded_products.shape)
     #torch.save(encoded_reactants, 'rxn_encoded_reac_uspto_full.pt')
     torch.save(encoded_products, 'rxn_encoded_prod_uspto50k_test.pt')
+
     
 if __name__ == '__main__':
     argparser = argparse.ArgumentParser()
