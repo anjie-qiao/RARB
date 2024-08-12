@@ -1,4 +1,4 @@
-# RARB： An reterieval-aumented graph generation framework
+# RARB： A Retrieval-Augmented Graph Generation Framework
 
 we use the already trained Uni-rxn model to encode reactants for retrobridge and retrieval learning
 the code come from the official git repository : https://github.com/qiangbo1222/Uni-RXN-official
