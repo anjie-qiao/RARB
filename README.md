@@ -1,4 +1,4 @@
-# Uni-RXN: An Unified Framework that Bridge the Gap between Chemical Reaction Pretraining and Conditional Molecule Generation
+# RARB： An reterieval-aumented graph generation framework
 
 we use the already trained Uni-rxn model to encode reactants for retrobridge and retrieval learning
 the code come from the official git repository : https://github.com/qiangbo1222/Uni-RXN-official
