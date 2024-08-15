@@ -11,15 +11,15 @@ we modified the following files for our tasks:
 generate embedding commands:
 ```shell
 python generation/build_retro_emb.py  \
---retrieval_file   /home/users/wangzh/qanjie/RetroDiff_label/ConRetrobridge/data/uspto50k/raw/uspto50k_train.csv  \
+--retrieval_file   /data/uspto50k/raw/uspto50k_train.csv  \
 --model_dir  ckpt/uni_rxn_base.ckpt
 ```
 
 retrieve top-k reactants commands:
 ```shell
 python generation/build_retrieval_index.py  \
---input_file  /home/users/wangzh/qanjie/RetroDiff_label/ConRetrobridge/data/uspto50k/raw/uspto50k_train.csv  \
---retrieval_file   /home/users/wangzh/qanjie/RetroDiff_label/ConRetrobridge/data/uspto50k/raw/uspto50k_train.csv  \
+--input_file  /data/uspto50k/raw/uspto50k_train.csv  \
+--retrieval_file  /data/uspto50k/raw/uspto50k_train.csv  \
 --embedding_file tencoded_react_tensor.pt \
 --retrieval_type  morgan \
 --model_dir  ckpt/uni_rxn_base.ckpt
