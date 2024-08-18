@@ -19,7 +19,7 @@ import pandas as pd
 
 
 
-input_file = "/home/users/wangzh/qanjie/RetroDiff_label/ConRetrobridge/data/uspto50k/raw/uspto50k_train.csv"
+input_file = "/data/uspto50k/raw/uspto50k_train.csv"
 output_f = input_file.split('.')[0] + '_unirxnGT.csv'
 input_df = pd.read_csv(input_file)
 index_list = [None] * len(input_df)
