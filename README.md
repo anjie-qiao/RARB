@@ -1,5 +1,33 @@
 # RARB： A Retrieval-Augmented Graph Generation Framework
+## Environment Setup
+|Software|Version|
+|-----|-----|
+|Python|3.9|
+|CUDA|11.6|
+```shell
+conda create --name retrobridge python=3.9 rdkit=2023.09.5 -c conda-forge -y
+conda activate retrobridge
+pip install -r requirements.txt
+```
+## Training
 
+ `python train.py --config configs/retrobridge.yaml --model RetroBridge`
+
+## Sampling
+Sampling with RARB:
+```shell
+python samplet.py \
+       --config configs/retrobridge.yaml \
+       --checkpoint checkpoints/RARB.ckpt \
+       --samples samples \
+       --model RetroBridge \
+       --mode test \
+       --n_samples 100 \
+       --n_steps 500\
+       --sampling_seed 1
+```
+
+## Uni-Rxn molecule encoder
 we use the already trained Uni-rxn model to encode reactants for retrobridge and retrieval learning
 the code come from the official git repository : https://github.com/qiangbo1222/Uni-RXN-official
 we modified the following files for our tasks:
@@ -24,3 +52,9 @@ python generation/build_retrieval_index.py  \
 --retrieval_type  morgan \
 --model_dir  ckpt/uni_rxn_base.ckpt
 ```
+## USPTO-50k-cluseter dataset
+```shell
+cluster_splitting.ipynb
+```
+
+
