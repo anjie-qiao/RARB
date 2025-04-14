@@ -57,8 +57,8 @@ python generation/build_retrieval_index.py  \
 cluster_splitting.ipynb
 ```
 
-##Citation
-'''shell
+## Citation
+```shell
 @article{rarb2025, 
 title={Advancing Retrosynthesis with Retrieval-Augmented Graph Generation},
 author={Qiao, Anjie and Wang, Zhen and Rao, Jiahua and Yang, Yuedong and Wei, Zhewei},
@@ -69,6 +69,6 @@ volume={39},
 pages={20004-20013} 
 DOI={10.1609/aaai.v39i19.34203}, 
 }
-'''
+```
 
 
