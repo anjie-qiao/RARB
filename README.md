@@ -1,4 +1,4 @@
-# RARB： A Retrieval-Augmented Graph Generation Framework
+# RARB： Advancing Retrosynthesis with Retrieval-Augmented Graph Generation
 ## Environment Setup
 |Software|Version|
 |-----|-----|
