@@ -9,6 +9,9 @@ conda create --name retrobridge python=3.9 rdkit=2023.09.5 -c conda-forge -y
 conda activate retrobridge
 pip install -r requirements.txt
 ```
+
+## Data
+  You can download all the data used in our work from: https://drive.google.com/file/d/13FP-RBetjKZ1T-6gzD_PosLMIcaNLfF7/view?usp=sharing
 ## Training
 
  `python train.py --config configs/retrobridge.yaml --model RetroBridge`
