@@ -5,8 +5,8 @@
 |Python|3.9|
 |CUDA|11.6|
 ```shell
-conda create --name retrobridge python=3.9 rdkit=2023.09.5 -c conda-forge -y
-conda activate retrobridge
+conda create --name rarb python=3.9 rdkit=2023.09.5 -c conda-forge -y
+conda activate rarb
 pip install -r requirements.txt
 ```
 
