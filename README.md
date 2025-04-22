@@ -4,7 +4,7 @@
 
 > We introduce a retrieval-augmented molecular graph generation framework. Our framework comprises three key components: a retrieval component that identifies similar molecules for the given product, an integration component that learns valuable clues from these molecules about which part of the product should remain unchanged, and a base generative model that is prompted by these clues to generate the corresponding reactants. We explore various design choices for critical and under-explored aspects of this framework and instantiate it as the Retrieval-Augmented RetroBridge(RARB). RARB demonstrates state-of-the-art performance on standard benchmarks, achieving a 14.8% relative improvement in top-1 accuracy over its base generative model, highlighting the effectiveness of retrieval augmentation. Additionally, RARB excels in handling out-of-distribution molecules, and its advantages remain significant even with smaller models or fewer denoising steps. These strengths make RARB highly valuable for real-world retrosynthesis applications, where extrapolation to novel molecules and high-throughput prediction are essential.
 
-<img src="resources/overview.png">
+<img src="overview.jpg">
 
 
 ## Environment Setup
