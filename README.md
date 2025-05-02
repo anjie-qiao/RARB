@@ -6,6 +6,8 @@
 
 <img src="overview.jpg">
 
+## Appendix
+  You can find the appendix of our paper in this repository: rarb_appendix.pdf.
 
 ## Environment Setup
 |Software|Version|
