@@ -29,7 +29,7 @@ pip install -r requirements.txt
 ## Sampling
 Sampling with RARB:
 ```shell
-python samplet.py \
+python sample.py \
        --config configs/retrobridge.yaml \
        --checkpoint checkpoints/RARB.ckpt \
        --samples samples \
