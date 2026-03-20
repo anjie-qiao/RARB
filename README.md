@@ -21,7 +21,7 @@ pip install -r requirements.txt
 ```
 
 ## Data
-  You can download all the data used in our work from: https://drive.google.com/file/d/13FP-RBetjKZ1T-6gzD_PosLMIcaNLfF7/view?usp=sharing
+  You can download checkpoints and all the data used in our work from: [https://drive.google.com/file/d/13FP-RBetjKZ1T-6gzD_PosLMIcaNLfF7/view?usp=sharing](https://drive.google.com/drive/folders/1wM6vo-e-dMFyIdgWJufkEont4MS4gvEP?usp=drive_link)
 ## Training
 
  `python train.py --config configs/retrobridge.yaml --model RetroBridge`
